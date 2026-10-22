@@ -20,12 +20,21 @@ from ff7_3d import chemins, field, fond, profondeur, relief, reperes  # noqa: E4
 from ff7_3d.disque import Disque  # noqa: E402
 
 
-def traiter(nom, pas=4):
+def lire_etats(texte):
+    """« 1=2,2=1 » -> {1: 2, 2: 1} : groupe d'animation -> masque des états visibles (portes, lumières…)."""
+    etats = {}
+    for morceau in filter(None, (texte or "").split(",")):
+        groupe, masque = morceau.split("=")
+        etats[int(groupe)] = int(masque, 0)
+    return etats
+
+
+def traiter(nom, pas=4, etats=None):
     nom = nom.upper()
     with Disque(chemins.DISQUE) as d:
         d.verifier()
         champ, mim = field.charger(d, nom)
-    compose = fond.composer(champ, mim)
+    compose = fond.composer(champ, mim, etats)
     rp = reperes.calculer(champ, compose)
     rgb = compose.image[..., :3].copy()
     rgb[compose.image[..., 3] == 0] = 0
@@ -38,7 +47,8 @@ def traiter(nom, pas=4):
     stats = relief.ecrire(chemin, nom, compose.image, z, compose.origine, champ.camera.zoom, z_conv, pas,
                           relief.cartes_occlusion(champ), relief.masque_occlusion(compose))
     rapport.update(stats)
-    rapport.update({"nom": nom, "z_convergence": z_conv, "origine": compose.origine, "zoom": champ.camera.zoom})
+    rapport.update({"nom": nom, "z_convergence": z_conv, "origine": compose.origine, "zoom": champ.camera.zoom,
+                    "groupes": {str(g): e for g, e in fond.groupes(champ).items()}, "etats": etats or {}})
     try:
         from PIL import Image
         Image.fromarray(compose.image).save(chemins.sortie(dossier, "fond.png"))
@@ -56,9 +66,12 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("ecrans", nargs="+", help="noms des écrans (FIELD/<NOM>.DAT), par exemple MD1STIN")
     p.add_argument("--pas", type=int, default=4, help="écart de la grille du relief, en pixels (4 par défaut)")
+    p.add_argument("--etats", default="", help="variantes visibles : « groupe=masque,… » (aucune par défaut, "
+                   "comme le décor de base) ; la liste des groupes d'un écran est dans son rapport.json")
     a = p.parse_args()
+    etats = lire_etats(a.etats)
     for nom in a.ecrans:
-        chemin, rapport = traiter(nom, a.pas)
+        chemin, rapport = traiter(nom, a.pas, etats)
         print(f"{nom} -> {chemin} ({rapport['sommets']} sommets, {rapport['triangles']} triangles, "
               f"{rapport['cartes']} cartes d'occlusion, {rapport['octets'] // 1024} Ko, écart médian du sol {100 * rapport['ecart_median_relatif']:.1f} %)")
 
