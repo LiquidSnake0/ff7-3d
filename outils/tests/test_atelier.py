@@ -8,7 +8,7 @@ import unittest
 
 import numpy as np
 
-from ff7_3d import chemins, field, fond, lzs
+from ff7_3d import camera, chemins, field, fond, lzs, reperes
 from ff7_3d.disque import Disque
 from ff7_3d.vram import Vram
 
@@ -84,6 +84,25 @@ class TestMd1stin(unittest.TestCase):
         self.assertEqual(r.image.shape, (512, 512, 4))
         self.assertGreater((r.image[..., 3] > 0).mean(), 0.9)
         self.assertTrue(set(np.unique(r.couche)) <= {0, 1, 2})
+
+    def test_walkmesh_devant_la_camera_et_dans_le_decor(self):
+        pts = np.array([v for tri in self.champ.walkmesh.triangles for v in tri])
+        ecran, z = camera.projeter(self.champ.camera, pts)
+        self.assertTrue((z > 0).all())
+        # le sol tombe dans l'image du décor (512 x 512, origine -256, -256) ; un bout dépasse à gauche
+        # (x = -275), hors de la zone où la caméra peut défiler
+        self.assertTrue((ecran > -300).all() and (ecran < 300).all())
+        self.assertTrue((ecran[:, 1] > -60).all() and (ecran[:, 1] < 100).all())
+
+    def test_reperes(self):
+        r = fond.composer(self.champ, self.mim)
+        rp = reperes.calculer(self.champ, r)
+        sol = rp.z_sol[np.isfinite(rp.z_sol)]
+        self.assertGreater(sol.size, 10000)
+        # le sol du walkmesh est dans la même plage que les profondeurs des tuiles de couche 2 (4 x ID)
+        self.assertTrue(250 < sol.min() < sol.max() < 2400)
+        self.assertEqual(set(np.unique(rp.z_tuiles[np.isfinite(rp.z_tuiles)])), {4.0, 608.0, 1176.0, 2176.0})
+        self.assertTrue(np.isinf(rp.z_occlusion[r.couche == 1]).all())
 
 
 if __name__ == "__main__":
