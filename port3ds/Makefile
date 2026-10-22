@@ -20,7 +20,7 @@ ROMFS		:=
 
 APP_TITLE	:=	ff7-3d
 APP_DESCRIPTION	:=	FF7 field relief in stereoscopic 3D
-APP_AUTHOR	:=	Selim Selimi
+APP_AUTHOR	:=	swave
 
 ARCH	:=	-march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft
 CFLAGS	:=	-g -Wall -Wextra -Wno-unused-parameter -O2 -mword-relocations -ffunction-sections $(ARCH)

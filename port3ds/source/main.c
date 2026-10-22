@@ -1,6 +1,6 @@
 /*
  * ff7-3d -- New 3DS viewer of one field background in stereoscopic 3D.
- * Copyright (C) 2026 Selim Selimi
+ * Copyright (C) 2026 swave
  *
  * This program is free software: you can redistribute it and/or modify it under the terms of the GNU Affero
  * General Public License as published by the Free Software Foundation, either version 3 of the License, or (at
@@ -82,8 +82,8 @@ static DVLB_s* s_dvlb;
 static shaderProgram_s s_programme;
 static int s_uProjection, s_uH, s_uStereo;
 
-/* CTR-3D's stereo tuning: total disparity at infinity, in PS1 pixels, at full slider. */
-static const float ECART_STEREO = 12.0f;
+/* Total disparity at infinity, in PS1 pixels, at full slider (CTR-3D uses 12). */
+static const float ECART_STEREO = 8.0f; /* 12 (CTR-3D) was too strong on FF7's backgrounds at full slider */
 
 static int chercher_paquet(char* chemin, size_t taille)
 {
@@ -352,8 +352,9 @@ static void placer_temoin(Relief* r, const float pied[3], float* px, float* py)
 static void dessiner(Relief* r, float cx, float cy, const float stereo[4], int avec_temoin)
 {
 	C3D_Mtx projection;
-	/* The visible window, in PS1 screen pixels; y grows downwards like on the PS1. */
-	Mtx_OrthoTilt(&projection, cx - ECRAN_L / 2, cx + ECRAN_L / 2, cy + ECRAN_H / 2, cy - ECRAN_H / 2, -32769.0f,
+	/* The visible window, in PS1 screen pixels; y grows downwards like on the PS1. First run on a New 3DS
+	 * (23.10.2026): with bottom = cy + H/2 the picture came out upside down, so bottom and top are swapped. */
+	Mtx_OrthoTilt(&projection, cx - ECRAN_L / 2, cx + ECRAN_L / 2, cy - ECRAN_H / 2, cy + ECRAN_H / 2, -32769.0f,
 	              32769.0f, true);
 	C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, s_uProjection, &projection);
 	C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uH, (float)r->e.zoom, 1.0f / (float)r->e.zoom, 0.0f, 0.0f);
