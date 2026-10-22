@@ -4,7 +4,7 @@ Le vertex shader de la PICA200 ne lit pas de texture : le relief est donc cuit d
 ligne. Chaque sommet porte sa position écran PS1 (sx, sy), son z caméra (profondeur d'affichage) et ses
 coordonnées de texture ; la 3DS refait la projection et la stéréo (port3ds/).
 
-Format .f3d, petit-boutiste, version 1 :
+Format .f3d, petit-boutiste, version 2 :
     en-tête (64 octets)
         char  magie[4]      "F3D1"
         u16   version       1
@@ -21,13 +21,23 @@ Format .f3d, petit-boutiste, version 1 :
     texture  tex_l x tex_h en RGB565, déjà tuilée pour la PICA200 (blocs 8x8 en ordre de Morton, lignes du bas vers le haut)
     sommets  nb_sommets x (f32 sx, f32 sy, f32 z, f32 u, f32 v)
     indices  nb_indices x u16 (triangles)
+    occlusion (version 2)
+        u16   nb_cartes
+        cartes nb_cartes x (s16 x, s16 y, u8 taille, u8 couche, u16 id) : une carte plate par tuile, à z = 4 · id
+        masque tex_l x tex_h en A8 tuilé comme la texture : 255 là où le texel visible vient d'une tuile qui
+               occulte (couches 2 à 4), 0 ailleurs
+
+La 3DS dessine d'abord le relief (couleur seule, sans écrire la profondeur), puis les cartes d'occlusion
+(profondeur seule, test alpha sur le masque), puis les objets du jeu avec le test de profondeur : un
+personnage passe derrière une tuile exactement quand il le faisait sur PS1.
 """
 import struct
 
 import numpy as np
 
 MAGIE = b"F3D1"
-VERSION = 1
+VERSION = 2
+ID_FOND = 4095
 TAILLE_EN_TETE = 64
 
 
@@ -79,7 +89,22 @@ def grille(z, origine, pas=4):
     return sommets, tris
 
 
-def ecrire(chemin, nom, image_rgba, z, origine, zoom, z_convergence, pas=4):
+def cartes_occlusion(champ):
+    """Tuiles qui occultent : couche 2 (ID par tuile), couches 3 et 4 quand elles ne sont pas au fond."""
+    cartes = []
+    for t in champ.tuiles:
+        if t.couche == 1 or t.profondeur >= ID_FOND - 15:
+            continue
+        cartes.append((t.x, t.y, t.taille, t.couche, max(t.profondeur, 1)))
+    return cartes
+
+
+def masque_occlusion(fond_compose):
+    m = (fond_compose.couche >= 2) & (fond_compose.profondeur_id < ID_FOND - 15)
+    return np.where(m, 255, 0).astype(np.uint8)
+
+
+def ecrire(chemin, nom, image_rgba, z, origine, zoom, z_convergence, pas=4, cartes=(), masque=None):
     h, l = z.shape
     for n in (h, l):
         if n & (n - 1) or n > 1024 or n < 8:
@@ -95,8 +120,14 @@ def ecrire(chemin, nom, image_rgba, z, origine, zoom, z_convergence, pas=4):
         f.write(texture.astype("<u2").tobytes())
         f.write(sommets.astype("<f4").tobytes())
         f.write(tris.astype("<u2").tobytes())
-    return {"sommets": len(sommets), "triangles": len(tris) // 3, "octets": TAILLE_EN_TETE + texture.nbytes
-            + sommets.nbytes + tris.nbytes}
+        f.write(struct.pack("<H", len(cartes)))
+        for x, y, taille, couche, ident in cartes:
+            f.write(struct.pack("<hhBBH", x, y, taille, couche, ident))
+        if masque is None:
+            masque = np.zeros((h, l), dtype=np.uint8)
+        f.write(tuiler(masque).tobytes())
+        octets = f.tell()
+    return {"sommets": len(sommets), "triangles": len(tris) // 3, "cartes": len(cartes), "octets": octets}
 
 
 def lire_en_tete(chemin):
