@@ -50,19 +50,29 @@ the floor. Everything else needs the depth model.
 
 Target field: `MD1STIN` (index 116 in `g_FieldFileInfo`), then `MD1_1`.
 
-1. [ ] Disc reader: raw `MODE2/2352` image, ISO 9660, SHA-1 check of the player's disc.
-2. [ ] LZS, field DAT sections, MIM upload into an emulated 1024x512 PS1 VRAM.
-3. [ ] Background composer: 4 layers, CLUT decode, semi-transparency, variants (`parameter & 0x3F`, `state`).
-4. [ ] Camera and walkmesh, GTE projection of the floor onto the background.
-5. [ ] Depth anchors: floor, layer-2 tiles, layers 3/4; occlusion depth map.
-6. [ ] Depth model on the composed background, fitted on the anchors.
-7. [ ] Relief mesh (grid, cut at depth discontinuities) and the package format read by the 3DS.
-8. [ ] 3DS viewer: relief in stereo with the 3D slider, frame counter.
+1. [x] Disc reader: raw `MODE2/2352` image, ISO 9660, serial check of the player's disc (`SCUS-94163`).
+2. [x] LZS, field DAT sections, MIM upload into an emulated 1024x512 PS1 VRAM.
+3. [x] Background composer: 4 layers, CLUT decode, semi-transparency, variants (`parameter & 0x3F`, `state`).
+4. [x] Camera and walkmesh, GTE projection of the floor onto the background.
+5. [x] Depth anchors: floor, layer-2 tiles, layers 3/4; occlusion depth map.
+6. [x] Depth model on the composed background, fitted on the anchors.
+7. [x] Relief mesh (regular 4 px grid; cutting it at depth discontinuities is still to do) and the package format read by the 3DS.
+8. [~] 3DS viewer: relief in stereo with the 3D slider, frame counter. Built (`port3ds/`), not yet run on hardware.
 9. [ ] Occlusion pass and a test object passing behind a layer-2 pillar.
 10. [ ] Cloud: model, walk animation, movement on the walkmesh; measurements.
 
 Milestone 2 joins ff7-decomp: PsyZ 3DS backend, the real field engine driving Cloud, `AddBackgroundToRender`
 replaced.
+
+## Where it stands
+
+- `MD1STIN` goes from the player's disc to a 1 MB relief package: background composed in ordering-table order
+  (94 % of the 512x512 canvas covered), floor anchors from the walkmesh, depth model fitted with a 1.5 % median
+  error on the floor, 16 641 vertices, 32 768 triangles. A PC preview (`outils/apercu.py`) shows the expected
+  parallax.
+- The 3DS viewer builds to `port3ds/ff7-3d.3dsx`; the first run on a New 3DS is the next step.
+- Not yet: the occlusion pass (step 9), Cloud (step 10), background variants (`parameter`/`state` groups:
+  `MD1STIN` has none), layer 3/4 scrolling.
 
 ## Rules
 
