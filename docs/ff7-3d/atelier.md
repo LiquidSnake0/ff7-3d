@@ -37,8 +37,15 @@ Other locations: `FF7_3D_DAV2`, `FF7_3D_POIDS`, `FF7_3D_DISQUE`, `FF7_3D_SORTIE`
    anchors (weighted, robust); the floor is then taken exactly; each layer-2 tile is shifted onto `4 x ID`
    only when that ID agrees with the model within 30 % (IDs are first a sorting key).
 
+6. `relief.py`: a 4 px grid; a vertex takes the median depth of its cell, or the nearest one across a depth
+   break (more than 15 %), so a foreground silhouette stays sharp; the occlusion cards (one per occluding tile,
+   at `4 x ID`) and the A8 mask of the texels that occlude. `atelier.py --etats 1=1,2=1` composes a variant
+   (doors, lights: `parameter & 0x3F` groups and their `state` bits, listed in each field's `rapport.json`).
+
 First field, `MD1STIN`: the floor fit has a median relative error of 1.5 % over about 35 000 anchor pixels.
 42 layer-2 tiles disagree with their ID by more than 30 % and keep the model's depth.
+`MD1_1` and `MD1_2` go through the same pipeline unchanged (floor errors 1.6 % and 0.6 %; `MD1_2` has two
+animation groups).
 
 ## Tests
 
