@@ -491,6 +491,29 @@ static void placer_temoin(Relief* r, const float pied[3], float* px, float* py)
  * Mtx_OrthoTilt maps a larger vertex z to a smaller stored depth: LEQUAL with the clear at the far end
  * (CTR-3D, n3ds_backend.c).
  */
+/* One line with the fields the exits lead to, each once: where the player can walk from here. */
+static void afficher_sorties(const Relief* r)
+{
+	char ligne[41] = "sorties :";
+	size_t n = strlen(ligne);
+	int i, j;
+	for (i = 0; i < r->nb_portes; i++)
+	{
+		char nom[10];
+		int deja = 0;
+		memcpy(nom, r->portes[i].cible, 9);
+		nom[9] = 0;
+		for (j = 0; j < i && !deja; j++)
+			deja = strncmp(r->portes[j].cible, r->portes[i].cible, 9) == 0;
+		if (deja || !nom[0] || n + 1 + strlen(nom) >= sizeof(ligne))
+			continue;
+		n += (size_t)snprintf(ligne + n, sizeof(ligne) - n, " %s", nom);
+	}
+	if (!r->nb_portes)
+		snprintf(ligne + n, sizeof(ligne) - n, " aucune");
+	printf("%-40s\n", ligne);
+}
+
 static void dessiner(Relief* r, float cx, float cy, const float stereo[4], int avec_temoin)
 {
 	C3D_Mtx projection;
@@ -955,6 +978,7 @@ int main(int argc, char** argv)
 			else
 				printf("temoin : %6.0f %6.0f %5.0f (ZR)  \n", et.pied[0], et.pied[1], et.pied[2]);
 			printf("cartes d'occlusion : %u            \n", r->nb_cartes);
+			afficher_sorties(r);
 			printf("GPU %4.1f %%  CPU %4.1f %%            \n", C3D_GetDrawingTime() * 6.0f,
 			       C3D_GetProcessingTime() * 6.0f);
 			printf("\nSELECT stats  ZR %s  B courir\nY ecrans  START quitter\n", r->a_perso ? "Cloud" : "temoin");
