@@ -77,6 +77,22 @@ class TestCloud(unittest.TestCase):
         self.assertTrue(all(max(t[:3]) < c.nb_sommets for t in c.triangles))
         self.assertTrue(115 < c.hauteur < 140)
 
+    def test_section_personnage_du_paquet(self):
+        import io
+        import struct
+        from ff7_3d import relief
+        c = modele.cuire(self.cloud, animations=[0, 1])
+        f = io.BytesIO()
+        relief.ecrire_personnage(f, c)
+        b = f.getvalue()
+        magie, nb_s, nb_t, nb_a, _b, _b2, h = struct.unpack_from("<4sHHBBHf", b, 0)
+        self.assertEqual((magie, nb_s, nb_t, nb_a), (b"PERS", 298, len(c.triangles), 2))
+        p = 16 + 16 * nb_t
+        self.assertEqual(struct.unpack_from("<H", b, p)[0], 1)
+        p += 4 + 298 * 12
+        self.assertEqual(struct.unpack_from("<H", b, p)[0], 30)
+        self.assertEqual(len(b), p + 4 + 30 * 298 * 12)
+
     def test_la_marche_bouge_les_jambes(self):
         r, t = modele.racine(np.eye(3), np.zeros(3), np.zeros(3), 0)
         a = np.concatenate(modele.sommets_monde(self.cloud, modele.matrices(self.cloud, 1, 0, r, t)))
