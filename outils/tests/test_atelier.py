@@ -105,10 +105,10 @@ class TestRelief(unittest.TestCase):
                                   cartes=[(0, 0, 16, 2, 300)], masque=np.full((64, 64), 255, np.uint8))
             e = relief.lire_en_tete(chemin)
             self.assertEqual(os.path.getsize(chemin), stats["octets"])
-            attendu = 64 + 64 * 64 * 2 + 81 * 20 + 8 * 8 * 6 * 2 + 2 + 8 + 64 * 64 + 18 + 12 + 2 + 2 + 16
+            attendu = 64 + 64 * 64 * 2 + 81 * 20 + 8 * 8 * 6 * 2 + 2 + 8 + 64 * 64 + 18 + 12 + 2 + 2 + 16 + 6
             self.assertEqual(stats["octets"], attendu)
         self.assertEqual((e["magie"], e["nom"], e["tex_l"], e["nb_sommets"], e["zoom"]), (b"F3D1", "TEST", 64, 81, 386))
-        self.assertEqual(e["version"], 4)
+        self.assertEqual(e["version"], 5)
         self.assertEqual(e["nb_indices"], 8 * 8 * 6)
 
 
@@ -177,7 +177,7 @@ class TestMd1stin(unittest.TestCase):
             relief.ecrire(chemin, "MD1STIN", r.image, z, r.origine, 386, 1000.0, 8, [], None, self.champ)
             with open(chemin, "rb") as f:
                 donnees = f.read()
-        fin_tri = 39 * 9 * 2 + 39 * 3 * 2 + 16  # + section personnage vide
+        fin_tri = 39 * 9 * 2 + 39 * 3 * 2 + 16 + 6 + 28  # + personnage vide, une porte
         debut = len(donnees) - fin_tri - 2 - 2 - 12 - 18
         m = struct.unpack_from("<9h", donnees, debut)
         zoom, n = struct.unpack_from("<hH", donnees, debut + 30)

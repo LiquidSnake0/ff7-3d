@@ -44,5 +44,22 @@ class TestPortes(unittest.TestCase):
                 self.assertLess(abs(p.arrivee[1] - sum(ys) / 3), 400, nom)
 
 
+@unittest.skipUnless(DISQUE_PRESENT, "disque du joueur absent")
+class TestSectionPortes(unittest.TestCase):
+    def test_section_du_paquet(self):
+        import io
+        import struct
+        from ff7_3d import relief
+        with Disque(chemins.DISQUE) as d:
+            champ = field.charger(d, "MD1_1")[0]
+        f = io.BytesIO()
+        relief.ecrire_portes(f, champ)
+        b = f.getvalue()
+        magie, n = struct.unpack_from("<4sH", b, 0)
+        self.assertEqual((magie, n, len(b)), (b"PORT", 2, 6 + 2 * 28))
+        cibles = sorted(struct.unpack_from("<6h2hh9sB", b, 6 + 28 * i)[9].rstrip(b"\0") for i in range(n))
+        self.assertEqual(cibles, [b"MD1STIN", b"MD1_2"])
+
+
 if __name__ == "__main__":
     unittest.main()
