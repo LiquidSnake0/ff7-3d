@@ -4,7 +4,7 @@ Le vertex shader de la PICA200 ne lit pas de texture : le relief est donc cuit d
 ligne. Chaque sommet porte sa position écran PS1 (sx, sy), son z caméra (profondeur d'affichage) et ses
 coordonnées de texture ; la 3DS refait la projection et la stéréo (port3ds/).
 
-Format .f3d, petit-boutiste, version 2 :
+Format .f3d, petit-boutiste, version 3 :
     en-tête (64 octets)
         char  magie[4]      "F3D1"
         u16   version       1
@@ -27,6 +27,14 @@ Format .f3d, petit-boutiste, version 2 :
         masque tex_l x tex_h en A8 tuilé comme la texture : 255 là où le texel visible vient d'une tuile qui
                occulte (couches 2 à 4), 0 ailleurs
 
+    caméra et walkmesh (version 3)
+        s16   matrice[9]    axes de la caméra, virgule fixe 4.12
+        s32   translation[3]
+        s16   zoom
+        u16   nb_triangles
+        triangles nb_triangles x 3 x (s16 x, s16 y, s16 z) : le sol praticable, coordonnées du monde (z vers le haut)
+        acces nb_triangles x 3 x s16 : voisin par arête, -1 = bloqué
+
 La 3DS dessine d'abord le relief (couleur seule, sans écrire la profondeur), puis les cartes d'occlusion
 (profondeur seule, test alpha sur le masque), puis les objets du jeu avec le test de profondeur : un
 personnage passe derrière une tuile exactement quand il le faisait sur PS1.
@@ -36,7 +44,7 @@ import struct
 import numpy as np
 
 MAGIE = b"F3D1"
-VERSION = 2
+VERSION = 3
 ID_FOND = 4095
 DISCONTINUITE = 1.15
 TAILLE_EN_TETE = 64
@@ -112,7 +120,7 @@ def masque_occlusion(fond_compose):
     return np.where(m, 255, 0).astype(np.uint8)
 
 
-def ecrire(chemin, nom, image_rgba, z, origine, zoom, z_convergence, pas=4, cartes=(), masque=None):
+def ecrire(chemin, nom, image_rgba, z, origine, zoom, z_convergence, pas=4, cartes=(), masque=None, champ=None):
     h, l = z.shape
     for n in (h, l):
         if n & (n - 1) or n > 1024 or n < 8:
@@ -134,6 +142,17 @@ def ecrire(chemin, nom, image_rgba, z, origine, zoom, z_convergence, pas=4, cart
         if masque is None:
             masque = np.zeros((h, l), dtype=np.uint8)
         f.write(tuiler(masque).tobytes())
+        if champ is None:
+            f.write(struct.pack("<9h3ihH", *([0] * 9), 0, 0, 0, zoom, 0))
+        else:
+            cam = champ.camera
+            m = [v for ligne in cam.axes for v in ligne]
+            f.write(struct.pack("<9h3ihH", *m, *cam.translation, cam.zoom, len(champ.walkmesh.triangles)))
+            for tri in champ.walkmesh.triangles:
+                for x, y, zz in tri:
+                    f.write(struct.pack("<3h", x, y, zz))
+            for acces in champ.walkmesh.acces:
+                f.write(struct.pack("<3h", *acces))
         octets = f.tell()
     return {"sommets": len(sommets), "triangles": len(tris) // 3, "cartes": len(cartes), "octets": octets}
 
