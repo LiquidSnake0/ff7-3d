@@ -12,6 +12,7 @@ import numpy as np
 from . import camera as cam
 
 ID_FOND = 4095
+ID_MIN_REPERE = 16
 
 
 @dataclass
@@ -68,13 +69,16 @@ def calculer(champ, fond_compose):
     z_occ = np.where(ids >= ID_FOND, np.inf, cam.id_vers_z(ids))
     z_occ[fond_compose.couche == 0] = np.inf
 
-    couche2 = (fond_compose.couche == 2) & (fond_compose.profondeur_id < ID_FOND - 16)
+    # Les tuiles d'ID très petit (1 sur MD1STIN) sont des avant-plans « toujours devant », pas une vraie
+    # profondeur : elles restent dans l'occlusion mais ne servent pas de repère.
+    couche2 = ((fond_compose.couche == 2) & (fond_compose.profondeur_id < ID_FOND - 16)
+               & (fond_compose.profondeur_id >= ID_MIN_REPERE))
     z_tuiles = np.where(couche2, cam.id_vers_z(ids), np.nan)
 
     # Le sol n'est un repère que là où il est visible : pas derrière une tuile de couche 2 plus proche.
     sol_visible = ~np.isnan(z_sol) & ~(couche2 & (z_tuiles < z_sol))
     poids = np.zeros((h, l))
     poids[sol_visible] = 1.0
-    poids[couche2] = np.maximum(poids[couche2], 0.5)  # une carte plate par tuile 16x16 : moins précis
+    poids[couche2] = np.maximum(poids[couche2], 0.2)  # une carte plate par tuile 16x16 : bien moins précis
     z_sol = np.where(sol_visible, z_sol, np.nan)
     return Reperes(z_sol, z_tuiles, z_occ, poids)
