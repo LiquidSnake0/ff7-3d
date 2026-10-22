@@ -58,7 +58,7 @@ Target field: `MD1STIN` (index 116 in `g_FieldFileInfo`), then `MD1_1`.
 6. [x] Depth model on the composed background, fitted on the anchors.
 7. [x] Relief mesh (regular 4 px grid; cutting it at depth discontinuities is still to do) and the package format read by the 3DS.
 8. [~] 3DS viewer: relief in stereo with the 3D slider, frame counter. Built (`port3ds/`), not yet run on hardware.
-9. [ ] Occlusion pass and a test object passing behind a layer-2 pillar.
+9. [~] Occlusion pass and a test object passing behind a layer-2 pillar. Built (package v2, 296 cards on `MD1STIN`), not yet run on hardware.
 10. [ ] Cloud: model, walk animation, movement on the walkmesh; measurements.
 
 Milestone 2 joins ff7-decomp: PsyZ 3DS backend, the real field engine driving Cloud, `AddBackgroundToRender`
@@ -71,7 +71,7 @@ replaced.
   error on the floor, 16 641 vertices, 32 768 triangles. A PC preview (`outils/apercu.py`) shows the expected
   parallax.
 - The 3DS viewer builds to `port3ds/ff7-3d.3dsx`; the first run on a New 3DS is the next step.
-- Not yet: the occlusion pass (step 9), Cloud (step 10), background variants (`parameter`/`state` groups:
+- Not yet: Cloud (step 10), background variants (`parameter`/`state` groups:
   `MD1STIN` has none), layer 3/4 scrolling.
 
 ## Rules
