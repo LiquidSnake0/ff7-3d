@@ -15,6 +15,17 @@ class TestNoms(unittest.TestCase):
         self.assertEqual((n[116], n[117], n[118]), ("MD1STIN", "MD1_1", "MD1_2"))
 
 
+class TestAtteignables(unittest.TestCase):
+    GRAPHE = {"A": ["B"], "B": ["A", "C", "D"], "C": ["E"], "D": [], "E": ["A"]}
+
+    def test_par_sauts(self):
+        v = self.GRAPHE.get
+        self.assertEqual(ecrans.atteignables(v, "A", 0), ["A"])
+        self.assertEqual(ecrans.atteignables(v, "A", 1), ["A", "B"])
+        self.assertEqual(ecrans.atteignables(v, "A", 2), ["A", "B", "C", "D"])
+        self.assertEqual(ecrans.atteignables(v, "A", 9), ["A", "B", "C", "D", "E"])
+
+
 @unittest.skipUnless(DISQUE_PRESENT, "disque du joueur absent")
 class TestPortes(unittest.TestCase):
     @classmethod
@@ -28,6 +39,11 @@ class TestPortes(unittest.TestCase):
 
     def test_aller_retour(self):
         self.assertEqual(sorted(ecrans.nom(p.index_cible) for p in self.champs["MD1_1"].portes), ["MD1STIN", "MD1_2"])
+
+    def test_deux_sauts_depuis_la_gare(self):
+        with Disque(chemins.DISQUE) as d:
+            v = ecrans.atteignables(ecrans.voisins_sur_disque(d), "MD1STIN", 2)
+        self.assertEqual(v, ["MD1STIN", "MD1_1", "MD1_2"])
 
     def test_arrivee_sur_le_walkmesh_cible(self):
         for nom, champ in self.champs.items():

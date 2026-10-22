@@ -491,6 +491,29 @@ static void placer_temoin(Relief* r, const float pied[3], float* px, float* py)
  * Mtx_OrthoTilt maps a larger vertex z to a smaller stored depth: LEQUAL with the clear at the far end
  * (CTR-3D, n3ds_backend.c).
  */
+/* One line with the fields the exits lead to, each once: where the player can walk from here. */
+static void afficher_sorties(const Relief* r)
+{
+	char ligne[41] = "sorties :";
+	size_t n = strlen(ligne);
+	int i, j;
+	for (i = 0; i < r->nb_portes; i++)
+	{
+		char nom[10];
+		int deja = 0;
+		memcpy(nom, r->portes[i].cible, 9);
+		nom[9] = 0;
+		for (j = 0; j < i && !deja; j++)
+			deja = strncmp(r->portes[j].cible, r->portes[i].cible, 9) == 0;
+		if (deja || !nom[0] || n + 1 + strlen(nom) >= sizeof(ligne))
+			continue;
+		n += (size_t)snprintf(ligne + n, sizeof(ligne) - n, " %s", nom);
+	}
+	if (!r->nb_portes)
+		snprintf(ligne + n, sizeof(ligne) - n, " aucune");
+	printf("%-40s\n", ligne);
+}
+
 static void dessiner(Relief* r, float cx, float cy, const float stereo[4], int avec_temoin)
 {
 	C3D_Mtx projection;
@@ -779,6 +802,7 @@ int main(int argc, char** argv)
 	float cx = 0.0f, cy = 0.0f;
 	float decal_x = 0.0f, decal_y = 0.0f;
 	int stats = 1;
+	float ms_pose = 0.0f; /* CPU time of personnage_poser (projection of Cloud's vertices), smoothed */
 	u64 dernier = 0;
 	float ms = 0.0f;
 
@@ -888,7 +912,9 @@ int main(int argc, char** argv)
 		if (et.temoin && r->a_perso)
 		{
 			float px, py, ph, pz;
+			u64 t0 = svcGetSystemTick();
 			personnage_poser(&r->perso, &et.cam, et.pied, et.angle, et.anim, et.image, &px, &py, &ph, &pz);
+			ms_pose = ms_pose * 0.9f + (float)(svcGetSystemTick() - t0) / CPU_TICKS_PER_MSEC * 0.1f;
 			et.convergence = et.convergence < 0 ? pz * et.facteur : et.convergence + (pz * et.facteur - et.convergence) * 0.1f;
 			/* the view follows him, centred on his waist, like the field camera scroll */
 			cx = px + decal_x;
@@ -947,9 +973,12 @@ int main(int argc, char** argv)
 			if (r->a_perso)
 				printf("Cloud : %6.0f %6.0f %5.0f a%d i%2d  \n", et.pied[0], et.pied[1], et.pied[2], et.anim,
 				       (int)et.image % (r->perso.nb_images[et.anim] ? r->perso.nb_images[et.anim] : 1));
+			if (r->a_perso)
+				printf("pose de Cloud : %4.2f ms CPU        \n", ms_pose);
 			else
 				printf("temoin : %6.0f %6.0f %5.0f (ZR)  \n", et.pied[0], et.pied[1], et.pied[2]);
 			printf("cartes d'occlusion : %u            \n", r->nb_cartes);
+			afficher_sorties(r);
 			printf("GPU %4.1f %%  CPU %4.1f %%            \n", C3D_GetDrawingTime() * 6.0f,
 			       C3D_GetProcessingTime() * 6.0f);
 			printf("\nSELECT stats  ZR %s  B courir\nY ecrans  START quitter\n", r->a_perso ? "Cloud" : "temoin");

@@ -16,7 +16,7 @@ A. Workshop (outils/, runs on the player's PC, never ships game data)
 B. Game = ff7-decomp (unchanged), later built for the 3DS through PsyZ
    one drawing entry point swapped: AddBackgroundToRender() -> the 3DS relief renderer
 
-C. PsyZ 3DS backend (later), modelled on PsyZ's PSP backend and on CTR-3D
+C. PsyZ 3DS backend (milestone 2, planned in jalon2-psyz-3ds.md), modelled on PsyZ's PSP backend and on CTR-3D
 
 D. 3DS renderer (port3ds/, citro3d)
    1. background: relief mesh, colour writes, no depth writes
@@ -68,7 +68,9 @@ Beyond step 10, built: the field list on the bottom screen, walking from one fie
 game's exits (`MD1STIN` -> `MD1_1` -> `MD1_2`, package version 5), the convergence following Cloud (saved).
 
 Milestone 2 joins ff7-decomp: PsyZ 3DS backend, the real field engine driving Cloud, `AddBackgroundToRender`
-replaced.
+replaced. The plan is in `jalon2-psyz-3ds.md`: PsyZ's draw contract and its PSP backend file by file, the
+blocker to solve first (the game's fixed PS1 addresses, which a 3DS cannot map; inventory in
+`outils/adresses_ps1.py`), the renderer taken from CTR-3D, steps 0 to 6. Not coded yet.
 
 ## Where it stands
 
@@ -76,7 +78,8 @@ replaced.
   (94 % of the 512x512 canvas covered), floor anchors from the walkmesh, depth model fitted with a 1.5 % median
   error on the floor, 16 641 vertices, 32 768 triangles. A PC preview (`outils/apercu.py`) shows the expected
   parallax.
-- The 3DS viewer builds to `port3ds/ff7-3d.3dsx`; the first run on a New 3DS is the next step.
+- The 3DS viewer builds to `port3ds/ff7-3d.3dsx`; the first run on a New 3DS is the next step (checklist in
+  `port3ds/README.md`).
 - Cloud is in the package and in the viewer (`cloud.md`); not yet: his face textures and lighting, background variants (`parameter`/`state` groups:
   `MD1STIN` has none), layer 3/4 scrolling.
 

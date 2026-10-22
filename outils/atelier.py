@@ -5,7 +5,8 @@
     -> sortie/md1stin/md1stin.f3d (+ fond.png, profondeur.png, personnage.png et rapport.json pour contrôle)
 
 Le paquet emporte le personnage du joueur (Cloud au début du jeu), lu dans FIELD/<NOM>.BCX et cuit image
-par image ; --sans-personnage l'omet.
+par image ; --sans-personnage l'omet. --suivre N ajoute les écrans où mènent les portes, jusqu'à N passages
+(« atelier.py MD1STIN --suivre 2 » : MD1STIN, MD1_1, MD1_2), ceux que la 3DS chargera en marchant.
 
 L'étape de profondeur demande l'environnement du modèle (docs/ff7-3d/atelier.md). Rien de ce qui est
 produit ne doit entrer dans git : tout va dans sortie/.
@@ -19,7 +20,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from ff7_3d import chemins, field, fond, modele, profondeur, relief, rendu, reperes  # noqa: E402
+from ff7_3d import chemins, ecrans, field, fond, modele, profondeur, relief, rendu, reperes  # noqa: E402
 from ff7_3d.disque import Disque  # noqa: E402
 
 
@@ -85,9 +86,18 @@ def main():
     p.add_argument("--sans-personnage", action="store_true", help="ne pas emporter le personnage du joueur")
     p.add_argument("--etats", default="", help="variantes visibles : « groupe=masque,… » (aucune par défaut, "
                    "comme le décor de base) ; la liste des groupes d'un écran est dans son rapport.json")
+    p.add_argument("--suivre", type=int, default=0, metavar="N",
+                   help="ajouter les écrans atteignables par les portes en au plus N passages")
     a = p.parse_args()
     etats = lire_etats(a.etats)
-    for nom in a.ecrans:
+    liste = [n.upper() for n in a.ecrans]
+    if a.suivre > 0:
+        with Disque(chemins.DISQUE) as d:
+            voisins = ecrans.voisins_sur_disque(d)
+            for depart in list(liste):
+                liste += [n for n in ecrans.atteignables(voisins, depart, a.suivre) if n not in liste]
+        print("écrans : " + " ".join(liste))
+    for nom in liste:
         chemin, rapport = traiter(nom, a.pas, etats, not a.sans_personnage)
         print(f"{nom} -> {chemin} ({rapport['sommets']} sommets, {rapport['triangles']} triangles, "
               f"{rapport['cartes']} cartes d'occlusion, {rapport['octets'] // 1024} Ko, écart médian du sol {100 * rapport['ecart_median_relatif']:.1f} %, personnage {rapport['personnage'] or 'aucun'})")

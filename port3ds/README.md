@@ -53,8 +53,9 @@ cd ~/Documents/ff7-3d && port3ds/construire.sh      # -> port3ds/ff7-3d.3dsx
 
 ## On the console
 
-1. Generate a package: `~/opt/ff7-3d/venv/bin/python outils/atelier.py MD1STIN` (see `docs/ff7-3d/atelier.md`).
-2. Start ftpd on the 3DS, then from the PC: `python3 port3ds/envoyer.py 192.168.x.y MD1STIN`
+1. Generate the packages: `~/opt/ff7-3d/venv/bin/python outils/atelier.py MD1STIN --suivre 2` (the station and
+   the two platforms it leads to, see `docs/ff7-3d/atelier.md`).
+2. Start ftpd on the 3DS, then from the PC: `python3 port3ds/envoyer.py 192.168.x.y MD1STIN MD1_1 MD1_2`
    (copies `ff7-3d.3dsx` and `md1stin.f3d` into `sdmc:/3ds/ff7-3d/`, checks the sizes).
 3. Homebrew Launcher, `ff7-3d`.
 
@@ -68,3 +69,15 @@ What to look at, on the real console (an emulator hides the PICA200's traps, CTR
   by the train's tiles where the PS1 would hide Cloud (layer-2 tiles at z 608 to 2176 on `MD1STIN`), along the
   tile shapes, not 16x16 squares; it never leaves the platform;
 - the frame time on the bottom screen (the mesh is 32 768 triangles per eye, plus the cards).
+
+Cloud, once the packages carry him (version 5), in this order:
+
+1. he stands on his feet, not lying on the floor, and is about as tall as on the PS1 next to the train;
+2. his pauldron is on his left shoulder (on his right: the model is mirrored, `docs/ff7-3d/cloud.md`);
+3. pushing the circle pad, he faces the step, his legs move, B makes him run;
+4. walking near the train, he passes behind its tiles along their shapes;
+5. at the end of the platform he goes through to `MD1_1`, arrives on the floor facing away from the exit and does
+   not bounce straight back; the "sorties" line lists where each field leads;
+6. the slider up, he stays sharp on the screen plane while the background recedes; L / R, then a restart: the
+   setting is kept;
+7. the stats: "pose de Cloud" (CPU time of his ~300 vertices) and the frame time, to note for the measures.
