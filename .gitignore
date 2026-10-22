@@ -20,3 +20,13 @@ undefined_syms_auto.*.txt
 build.ninja
 objdiff.json
 /permute*
+
+# ff7-3d : tout ce que l'atelier génère depuis le disque du joueur reste hors du dépôt
+/sortie/
+/outils/**/__pycache__/
+/port3ds/build/
+/port3ds/romfs/
+*.3dsx
+*.smdh
+*.elf
+*.f3d
