@@ -58,8 +58,9 @@ What the PSP backend teaches, and what will hold on the 3DS too:
 
 The PC build runs the decompiled code at the PS1's own addresses: `src/pc/main.c` maps `0x80010000` (main RAM,
 `0x1F0000` bytes) and `0x1F800000` (scratchpad) with `mmap(MAP_FIXED_NOREPLACE)`, because the game still writes
-to fixed addresses (`SysGzipSetDataBlock((u8*)0x801B0000)`, the field buffers, the overlays): about 77 pointer
-casts of a `0x80xxxxxx` constant under `src/`.
+to fixed addresses (`SysGzipSetDataBlock((u8*)0x801B0000)`, the field buffers, the overlays). `outils/adresses_ps1.py` counts them (read
+only, details in `sortie/adresses_ps1.tsv`): 928 literals in the PS1 RAM or scratchpad range under `src/` and
+`include/`, 146 of them in the sources of the `ff7` target (PSYZ, MAIN, MENU, MISC, FIELD groups) and the headers.
 
 A 3DS application cannot do that. Its user address space ends well below `0x80000000` (code from `0x00100000`,
 heap from `0x08000000`, linear memory from `0x30000000` on the New 3DS), and `svcControlMemory` only maps inside
@@ -80,6 +81,22 @@ Options, in the order to try them:
 
 Step 0 of the milestone measures this before any renderer work: build `ff7` on PC with option 1's rewrite and
 check that `MD1STIN` still loads and runs to `AddBackgroundToRender`.
+
+### What the inventory says about the `ff7` target
+
+| Kind | Count | Example | On the 3DS |
+|---|---|---|---|
+| pointer cast | 127 | `SysGzipSetDataBlock((u8*)0x801B0000)` | rewritten to `g_PsxRam + 0x1B0000` |
+| arithmetic | 8 | `relocation = (u32)file - 0x80000000` (`field_model.c`) | the model relocation needs **no** rewrite: on a 32-bit CPU, `0x80000000 + offset + relocation` wraps to `file + offset` |
+| arithmetic on a pointer | (in the 8) | `(u8*)((ode * 0x320) + 0x800B0000)` (`dschange.c`) | rewritten, the constant only |
+| bare integer | 9 | `AkaoStart(0x800F0000, 0x801BC800)`, `u32 D_80062DEC = 0x801D0000` | rewritten: an address passed as an integer |
+| not an address | 2 + some of the bare ones | `D_80095DDC & 0x80000000`, `STATUS_IMPRISONED = 0x80000000` | left alone |
+
+So the rewrite cannot be a blind substitution: masks and flags (`0x80000000` as a sign or status bit) must stay.
+The rule that comes out of the list: rewrite a literal when it is cast to a pointer, added to an offset and cast,
+or passed where the callee takes an address; keep `0x80000000` itself (a bit) and comparisons. The 9 bare
+integers are few enough to be listed by hand in the pass's configuration, with their file and line checked at
+every upstream sync (the pass fails when a listed line moves or a new bare literal appears).
 
 ## The renderer on citro3d
 
@@ -120,13 +137,14 @@ Not before step 5: battles, the world map, FMVs, saving (`sceUtilitySavedata` is
 
 ## Open questions
 
-- Are all `0x80xxxxxx` literals pointers? A list per file, built by the rewrite pass in a dry-run mode, decides it.
+- The inventory classifies on the text of one line; a literal reached through a `#define` of another line, or
+  built from pieces, escapes it. Running the PC build with nothing mapped at `0x80010000` (step 0) is the check.
 - `FieldModelAnimCalcMtrxs` and `FieldModelPrepareRender` are `NOT_IMPLEMENTED` in `src/pc/stubs_field.c`
   (still assembly upstream). Until upstream decompiles them, the 3DS build can draw the field models with
   the workshop's floating-point reading (`outils/ff7_3d/modele.py`, ported to C) behind the same names in
   `port3ds/`, never in `src/`.
 - Memory: 2 MB of PS1 RAM, 1 MB of shadow VRAM, the relief package (about 1.5 MB per field with Cloud) and the
-  texture cache must fit next to citro3d's command buffers; the New 3DS gives an application about 124 MB, so
+  texture cache must fit next to citro3d's command buffers; the New 3DS gives an application about 124 MB in its extended memory mode, so
   the budget is the linear memory for vertex buffers and textures, not the total.
 - How far PsyZ's software GTE costs on the 804 MHz ARM11: measure at step 2 with the boot logo, as the PSP
   README did (12 fps to 172 fps once the SPU moved off the main CPU).
