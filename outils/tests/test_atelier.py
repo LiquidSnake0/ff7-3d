@@ -79,12 +79,13 @@ class TestRelief(unittest.TestCase):
     def test_tuilage_pica200(self):
         img = np.arange(16 * 16, dtype=np.uint16).reshape(16, 16)
         t = relief.tuiler(img)
-        # le premier texel en mémoire est le coin en bas à gauche, le second son voisin de droite,
-        # le troisième celui du dessus (ordre de Morton), et le bloc suivant commence 8 colonnes plus loin
-        self.assertEqual(t[0], img[15, 0])
-        self.assertEqual(t[1], img[15, 1])
-        self.assertEqual(t[2], img[14, 0])
-        self.assertEqual(t[64], img[15, 8])
+        # avec t = 1 - y/h côté sommets, le premier texel en mémoire est le coin en haut à gauche, le second
+        # son voisin de droite, le troisième celui du dessous (ordre de Morton), et le bloc suivant commence
+        # 8 colonnes plus loin (vérifié sur la console le 23.10.2026 : l'inverse affichait le décor à l'envers)
+        self.assertEqual(t[0], img[0, 0])
+        self.assertEqual(t[1], img[0, 1])
+        self.assertEqual(t[2], img[1, 0])
+        self.assertEqual(t[64], img[0, 8])
         self.assertEqual(sorted(t.tolist()), sorted(img.ravel().tolist()))
 
     def test_grille_et_paquet(self):
