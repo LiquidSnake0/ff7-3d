@@ -1,0 +1,95 @@
+; ff7-3d -- vertex shader of the background relief (New 3DS, PICA200).
+;
+; Adapted from CTR-3D (https://github.com/zando95/CTR-3D),
+; platform/n3ds/shaders/ctr_model.v.pica, GPL-3.0, by zando95 and the CTR-3D
+; contributors: the perspective-correct depth substrate, the stereo parallax
+; p = k - kC/depth and the PICA200 operand rules are theirs. Changes for
+; ff7-3d (input already in PS1 screen space, one baked relief mesh per field)
+; are distributed with the whole project under the AGPL-3.0; GPL-3.0 code may
+; be combined with AGPL-3.0 code (section 13 of both licenses).
+;
+; Input: one vertex of the relief baked by outils/ff7_3d/relief.py
+;   v0 = (sx, sy, z): PS1 screen position (same frame as the field tiles,
+;        origin at the centre) and camera depth (GTE units, display depth)
+;   v1 = (u, v): texture coordinates of the composed background
+;
+; The field camera projects sx = H * x / z, so with w = z / H the homogeneous
+; position is (w * sx, w * sy, ., w) and the GPU's own divide gives back sx.
+;
+; Hardware rules carried over from CTR-3D (docs/3DS_PORT.md):
+; - projection[4] is declared first (uniform registers are shared by programs);
+; - a uniform or constant can only be src1; temps go in src2;
+; - every component of every declared output is written.
+
+.fvec projection[4] ; f0-f3, Mtx_OrthoTilt over the visible PS1 screen window
+.fvec hParam        ; x = H (field camera zoom), y = 1 / H
+.fvec stereo        ; x = k, y = k * convergence, z/w = clamp lo/hi (zeros in mono)
+
+.constf constants(0.0, 1.0, -1.0, 32735.0)
+.alias  zeros      constants.xxxx
+.alias  ones       constants.yyyy
+.alias  negOne     constants.zzzz
+.alias  pdNearPerW constants.wwww
+
+; x = near floor of the depth axis, y = far ceiling,
+; z/w = substrate: stored z = B/depth - B/65535, B = 2095040 (CTR-3D's constants)
+.constf depthConst(64.0, 65535.0, 2095040.0, -31.968)
+.alias  depthMin depthConst.xxxx
+.alias  depthMax depthConst.yyyy
+.alias  pdScale  depthConst.zzzz
+.alias  pdFar    depthConst.wwww
+
+.out outpos position
+.out outtc0 texcoord0
+.out outclr color
+
+.alias inpos v0
+.alias intc  v1
+
+.proc main
+	mov r2.xyz, inpos.xyz
+
+	; w = z / H ; a = w * sx ; b = w * sy
+	mul r1.z, hParam.yyyy, r2.zzzz
+	mul r1.x, r2.xxxx, r1.zzzz
+	mul r1.y, r2.yyyy, r1.zzzz
+
+	; depth = clamp(z, 64, 65535)
+	max r3.w, depthMin, r2.zzzz
+	min r3.w, depthMax, r3.wwww
+
+	; stereo: p = clamp(k - kC / depth, lo, hi), a += w * p
+	rcp r5.x, r3.w
+	mul r5.y, stereo.yyyy, r5.xxxx
+	mul r5.y, negOne, r5.yyyy
+	add r5.y, stereo.xxxx, r5.yyyy
+	max r5.y, stereo.zzzz, r5.yyyy
+	min r5.y, stereo.wwww, r5.yyyy
+	mul r5.z, r1.zzzz, r5.yyyy
+	add r1.x, r1.xxxx, r5.zzzz
+
+	; S.z = min(B / H, w * B / 64) + w * pdFar = w * (B / max(depth, 64) + pdFar)
+	mov r3.y, hParam.xxxx
+	max r3.y, ones, r3.yyyy
+	rcp r3.y, r3.y
+	mul r3.y, pdScale, r3.yyyy
+	mul r3.z, pdNearPerW, r1.zzzz
+	min r3.y, r3.yyyy, r3.zzzz
+	mul r3.x, pdFar, r1.zzzz
+	add r3.x, r3.xxxx, r3.yyyy
+
+	mov r4.x, r1.x
+	mov r4.y, r1.y
+	mov r4.z, r3.x
+	mov r4.w, r1.z
+
+	dp4 outpos.x, projection[0], r4
+	dp4 outpos.y, projection[1], r4
+	dp4 outpos.z, projection[2], r4
+	dp4 outpos.w, projection[3], r4
+
+	mov outtc0.xy, intc.xy
+	mov outtc0.zw, zeros
+	mov outclr, ones
+	end
+.end
