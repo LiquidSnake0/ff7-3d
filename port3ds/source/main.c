@@ -10,8 +10,8 @@
  * it on the top screen with the 3D slider. The stereo model, the depth substrate and the render-target setup
  * follow CTR-3D (https://github.com/zando95/CTR-3D, GPL-3.0); see source/relief.v.pica.
  *
- * Controls: circle pad / D-pad scroll, L / R move the convergence plane, SELECT toggles the frame stats,
- * START quits.
+ * Controls: circle pad / D-pad scroll, L / R move the convergence plane, Y / A move the test object sideways,
+ * X / B move it in depth, ZR shows or hides it, SELECT toggles the frame stats, START quits.
  */
 #include <3ds.h>
 #include <citro3d.h>
@@ -53,7 +53,23 @@ typedef struct
 	C3D_Tex texture;
 	float* sommets; /* linear memory: sx, sy, z, u, v */
 	u16* indices;   /* linear memory */
+	/* Occlusion of the original game (package version 2): one flat card per occluding tile, at z = 4 x ID,
+	 * alpha-tested against a mask of the texels that occlude. Same vertex layout as the relief. */
+	C3D_Tex masque;
+	float* cartes;    /* 4 vertices per card */
+	u16* idx_cartes;  /* 6 indices per card */
+	u16 nb_cartes;
+	float* temoin;    /* test object: a quad at a chosen depth, moved with Y / A (x) and X / B (depth) */
+	u16* idx_temoin;
 } Relief;
+
+/* One card of the package, as written by outils/ff7_3d/relief.py. */
+typedef struct
+{
+	s16 x, y;
+	u8 taille, couche;
+	u16 id;
+} __attribute__((packed)) CarteF3d;
 
 static DVLB_s* s_dvlb;
 static shaderProgram_s s_programme;
@@ -82,6 +98,70 @@ static int chercher_paquet(char* chemin, size_t taille)
 	return 0;
 }
 
+static void sommet(float* v, float sx, float sy, float z, const EnTeteF3d* e)
+{
+	v[0] = sx;
+	v[1] = sy;
+	v[2] = z;
+	v[3] = (sx - e->ox) / (float)e->tex_l;
+	v[4] = 1.0f - (sy - e->oy) / (float)e->tex_h;
+}
+
+static int charger_occlusion(FILE* f, Relief* r)
+{
+	u16 n, i;
+	CarteF3d c;
+	size_t octets_masque = (size_t)r->e.tex_l * r->e.tex_h;
+	if (fread(&n, sizeof(n), 1, f) != 1)
+		return 0;
+	r->nb_cartes = n;
+	r->cartes = linearAlloc((size_t)(n ? n : 1) * 4 * 5 * sizeof(float));
+	r->idx_cartes = linearAlloc((size_t)(n ? n : 1) * 6 * sizeof(u16));
+	if (!r->cartes || !r->idx_cartes)
+		return 0;
+	for (i = 0; i < n; i++)
+	{
+		float z, *v = r->cartes + (size_t)i * 20;
+		u16* k = r->idx_cartes + (size_t)i * 6;
+		if (fread(&c, sizeof(c), 1, f) != 1)
+			return 0;
+		z = 4.0f * c.id;
+		sommet(v + 0, c.x, c.y, z, &r->e);
+		sommet(v + 5, c.x + c.taille, c.y, z, &r->e);
+		sommet(v + 10, c.x, c.y + c.taille, z, &r->e);
+		sommet(v + 15, c.x + c.taille, c.y + c.taille, z, &r->e);
+		k[0] = i * 4 + 0;
+		k[1] = i * 4 + 2;
+		k[2] = i * 4 + 1;
+		k[3] = i * 4 + 1;
+		k[4] = i * 4 + 2;
+		k[5] = i * 4 + 3;
+	}
+	GSPGPU_FlushDataCache(r->cartes, (size_t)(n ? n : 1) * 4 * 5 * sizeof(float));
+	GSPGPU_FlushDataCache(r->idx_cartes, (size_t)(n ? n : 1) * 6 * sizeof(u16));
+
+	if (!C3D_TexInit(&r->masque, r->e.tex_l, r->e.tex_h, GPU_A8))
+		return 0;
+	if (fread(r->masque.data, 1, octets_masque, f) != octets_masque)
+		return 0;
+	C3D_TexFlush(&r->masque);
+	C3D_TexSetFilter(&r->masque, GPU_NEAREST, GPU_NEAREST);
+	C3D_TexSetWrap(&r->masque, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
+
+	r->temoin = linearAlloc(4 * 5 * sizeof(float));
+	r->idx_temoin = linearAlloc(6 * sizeof(u16));
+	if (!r->temoin || !r->idx_temoin)
+		return 0;
+	r->idx_temoin[0] = 0;
+	r->idx_temoin[1] = 2;
+	r->idx_temoin[2] = 1;
+	r->idx_temoin[3] = 1;
+	r->idx_temoin[4] = 2;
+	r->idx_temoin[5] = 3;
+	GSPGPU_FlushDataCache(r->idx_temoin, 6 * sizeof(u16));
+	return 1;
+}
+
 static int charger_relief(const char* chemin, Relief* r)
 {
 	FILE* f = fopen(chemin, "rb");
@@ -89,7 +169,7 @@ static int charger_relief(const char* chemin, Relief* r)
 	void* tampon;
 	if (!f)
 		return 0;
-	if (fread(&r->e, sizeof(r->e), 1, f) != 1 || memcmp(r->e.magie, "F3D1", 4) != 0 || r->e.version != 1)
+	if (fread(&r->e, sizeof(r->e), 1, f) != 1 || memcmp(r->e.magie, "F3D1", 4) != 0 || r->e.version != 2)
 	{
 		fclose(f);
 		return 0;
@@ -121,6 +201,8 @@ static int charger_relief(const char* chemin, Relief* r)
 		goto echec;
 	GSPGPU_FlushDataCache(r->sommets, octets_sommets);
 	GSPGPU_FlushDataCache(r->indices, octets_indices);
+	if (!charger_occlusion(f, r))
+		goto echec;
 	fclose(f);
 	return 1;
 
@@ -129,11 +211,9 @@ echec:
 	return 0;
 }
 
-static void preparer_rendu(Relief* r)
+static void preparer_rendu(void)
 {
 	C3D_AttrInfo* attr;
-	C3D_BufInfo* buf;
-	C3D_TexEnv* env;
 
 	s_dvlb = DVLB_ParseFile((u32*)relief_shbin, relief_shbin_size);
 	shaderProgramInit(&s_programme);
@@ -147,24 +227,51 @@ static void preparer_rendu(Relief* r)
 	AttrInfo_Init(attr);
 	AttrInfo_AddLoader(attr, 0, GPU_FLOAT, 3); /* sx, sy, z */
 	AttrInfo_AddLoader(attr, 1, GPU_FLOAT, 2); /* u, v */
-
-	buf = C3D_GetBufInfo();
-	BufInfo_Init(buf);
-	BufInfo_Add(buf, r->sommets, 5 * sizeof(float), 2, 0x10);
-
-	C3D_TexBind(0, &r->texture);
-	env = C3D_GetTexEnv(0);
-	C3D_TexEnvInit(env);
-	C3D_TexEnvSrc(env, C3D_Both, GPU_TEXTURE0, 0, 0);
-	C3D_TexEnvFunc(env, C3D_Both, GPU_REPLACE);
-
 	C3D_CullFace(GPU_CULL_NONE);
-	/* Mtx_OrthoTilt maps a larger vertex z to a smaller stored depth: LEQUAL with the clear at the far end
-	 * (CTR-3D, n3ds_backend.c). */
-	C3D_DepthTest(true, GPU_LEQUAL, GPU_WRITE_ALL);
 }
 
-static void dessiner(Relief* r, float cx, float cy, const float stereo[4])
+static void lier_sommets(const void* sommets)
+{
+	C3D_BufInfo* buf = C3D_GetBufInfo();
+	BufInfo_Init(buf);
+	BufInfo_Add(buf, sommets, 5 * sizeof(float), 2, 0x10);
+}
+
+static void combiner(C3D_Tex* texture, u32 couleur)
+{
+	C3D_TexEnv* env = C3D_GetTexEnv(0);
+	C3D_TexEnvInit(env);
+	if (texture)
+	{
+		C3D_TexBind(0, texture);
+		C3D_TexEnvSrc(env, C3D_Both, GPU_TEXTURE0, 0, 0);
+	}
+	else
+	{
+		C3D_TexEnvSrc(env, C3D_Both, GPU_CONSTANT, 0, 0);
+		C3D_TexEnvColor(env, couleur);
+	}
+	C3D_TexEnvFunc(env, C3D_Both, GPU_REPLACE);
+}
+
+static void placer_temoin(Relief* r, float tx, float ty, float tz)
+{
+	sommet(r->temoin + 0, tx - 10, ty - 40, tz, &r->e);
+	sommet(r->temoin + 5, tx + 10, ty - 40, tz, &r->e);
+	sommet(r->temoin + 10, tx - 10, ty, tz, &r->e);
+	sommet(r->temoin + 15, tx + 10, ty, tz, &r->e);
+	GSPGPU_FlushDataCache(r->temoin, 4 * 5 * sizeof(float));
+}
+
+/*
+ * One eye. The order is the design of docs/ff7-3d/README.md (layer D):
+ * 1. the relief: colour only, no depth writes (the stereo depth is for the eyes, not for sorting);
+ * 2. the occlusion cards of the original game: depth only, alpha-tested against the mask;
+ * 3. the game's objects (here the test object): depth test against the cards.
+ * Mtx_OrthoTilt maps a larger vertex z to a smaller stored depth: LEQUAL with the clear at the far end
+ * (CTR-3D, n3ds_backend.c).
+ */
+static void dessiner(Relief* r, float cx, float cy, const float stereo[4], int avec_temoin)
 {
 	C3D_Mtx projection;
 	/* The visible window, in PS1 screen pixels; y grows downwards like on the PS1. */
@@ -173,7 +280,30 @@ static void dessiner(Relief* r, float cx, float cy, const float stereo[4])
 	C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, s_uProjection, &projection);
 	C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uH, (float)r->e.zoom, 1.0f / (float)r->e.zoom, 0.0f, 0.0f);
 	C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uStereo, stereo[0], stereo[1], stereo[2], stereo[3]);
+
+	lier_sommets(r->sommets);
+	combiner(&r->texture, 0);
+	C3D_AlphaTest(false, GPU_ALWAYS, 0);
+	C3D_DepthTest(true, GPU_ALWAYS, GPU_WRITE_COLOR);
 	C3D_DrawElements(GPU_TRIANGLES, (int)r->e.nb_indices, C3D_UNSIGNED_SHORT, r->indices);
+
+	if (r->nb_cartes)
+	{
+		lier_sommets(r->cartes);
+		combiner(&r->masque, 0);
+		C3D_AlphaTest(true, GPU_GREATER, 127);
+		C3D_DepthTest(true, GPU_LEQUAL, GPU_WRITE_DEPTH);
+		C3D_DrawElements(GPU_TRIANGLES, r->nb_cartes * 6, C3D_UNSIGNED_SHORT, r->idx_cartes);
+	}
+
+	if (avec_temoin)
+	{
+		lier_sommets(r->temoin);
+		combiner(NULL, 0xFF4875E0); /* ABGR: a warm red, easy to see over Midgar's greens */
+		C3D_AlphaTest(false, GPU_ALWAYS, 0);
+		C3D_DepthTest(true, GPU_LEQUAL, GPU_WRITE_ALL);
+		C3D_DrawElements(GPU_TRIANGLES, 6, C3D_UNSIGNED_SHORT, r->idx_temoin);
+	}
 }
 
 /* p = k - kC/depth, clamped: far content recedes up to k, near content pops out up to 2k (CTR-3D's default). */
@@ -192,6 +322,8 @@ int main(int argc, char** argv)
 	char chemin[256];
 	C3D_RenderTarget *gauche, *droite;
 	float cx = 0.0f, cy = 0.0f, convergence;
+	float tx = 0.0f, tz;
+	int temoin = 1;
 	float xmin, xmax, ymin, ymax;
 	int stats = 1;
 	u64 dernier = 0;
@@ -236,6 +368,7 @@ int main(int argc, char** argv)
 		return 0;
 	}
 	convergence = relief.e.z_convergence;
+	tz = convergence;
 	xmin = relief.e.ox + ECRAN_L / 2;
 	xmax = relief.e.ox + relief.e.tex_l - ECRAN_L / 2;
 	ymin = relief.e.oy + ECRAN_H / 2;
@@ -249,7 +382,7 @@ int main(int argc, char** argv)
 	C3D_RenderTargetSetOutput(gauche, GFX_TOP, GFX_LEFT, DISPLAY_TRANSFER_FLAGS);
 	droite = C3D_RenderTargetCreate(ECRAN_H, ECRAN_L, GPU_RB_RGBA8, GPU_RB_DEPTH24_STENCIL8);
 	C3D_RenderTargetSetOutput(droite, GFX_TOP, GFX_RIGHT, DISPLAY_TRANSFER_FLAGS);
-	preparer_rendu(&relief);
+	preparer_rendu();
 
 	while (aptMainLoop())
 	{
@@ -272,6 +405,16 @@ int main(int argc, char** argv)
 		cy += ((tenu & KEY_DDOWN) ? 2 : 0) - ((tenu & KEY_DUP) ? 2 : 0);
 		cx = cx < xmin ? xmin : (cx > xmax ? xmax : cx);
 		cy = cy < ymin ? ymin : (cy > ymax ? ymax : cy);
+		if (tenu & KEY_A)
+			tx += 2.0f;
+		if (tenu & KEY_Y)
+			tx -= 2.0f;
+		if (tenu & KEY_X)
+			tz *= 1.02f;
+		if (tenu & KEY_B)
+			tz /= 1.02f;
+		if (appui & KEY_ZR)
+			temoin = !temoin;
 		if (tenu & KEY_R)
 			convergence *= 1.02f;
 		if (tenu & KEY_L)
@@ -283,15 +426,16 @@ int main(int argc, char** argv)
 		vecteur_oeil(-k, convergence, oeil[0]); /* left eye */
 		vecteur_oeil(k, convergence, oeil[1]);  /* right eye: far content shifts right */
 
+		placer_temoin(&relief, cx + tx, cy + 60.0f, tz);
 		C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
 		C3D_RenderTargetClear(gauche, C3D_CLEAR_ALL, 0x000000FF, 0x00FFFFFF);
 		C3D_FrameDrawOn(gauche);
-		dessiner(&relief, cx, cy, oeil[0]);
+		dessiner(&relief, cx, cy, oeil[0], temoin);
 		if (actif)
 		{
 			C3D_RenderTargetClear(droite, C3D_CLEAR_ALL, 0x000000FF, 0x00FFFFFF);
 			C3D_FrameDrawOn(droite);
-			dessiner(&relief, cx, cy, oeil[1]);
+			dessiner(&relief, cx, cy, oeil[1], temoin);
 		}
 		C3D_FrameEnd(0);
 
@@ -307,13 +451,20 @@ int main(int argc, char** argv)
 			printf("curseur 3D : %3.0f %%  ecart : %4.1f px    \n", curseur * 100.0f, 2 * k);
 			printf("convergence z : %6.0f (L / R)       \n", convergence);
 			printf("vue : %5.0f, %5.0f (pad)          \n", cx, cy);
+			printf("temoin : x %+5.0f  z %6.0f (Y A / X B)  \n", tx, tz);
+			printf("cartes d'occlusion : %u            \n", relief.nb_cartes);
 			printf("GPU %4.1f %%  CPU %4.1f %%            \n", C3D_GetDrawingTime() * 6.0f,
 			       C3D_GetProcessingTime() * 6.0f);
-			printf("\nSELECT : stats   START : quitter\n");
+			printf("\nSELECT stats  ZR temoin  START quitter\n");
 		}
 	}
 
 	C3D_TexDelete(&relief.texture);
+	C3D_TexDelete(&relief.masque);
+	linearFree(relief.cartes);
+	linearFree(relief.idx_cartes);
+	linearFree(relief.temoin);
+	linearFree(relief.idx_temoin);
 	linearFree(relief.sommets);
 	linearFree(relief.indices);
 	shaderProgramFree(&s_programme);
