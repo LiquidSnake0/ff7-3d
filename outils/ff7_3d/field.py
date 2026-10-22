@@ -61,6 +61,17 @@ class Walkmesh:
 
 
 @dataclass
+class ChargeurModele:
+    """Une entrée de la section « modèles » du DAT (FieldModelLoaderData, include/game.h)."""
+    visage: int          # faceId : palette et textures des yeux et de la bouche
+    nb_os: int
+    nb_parties: int
+    nb_animations: int
+    pnj: bool            # npcFlag : chargé à l'entrée de l'écran
+    global_id: int       # 1 à 9 : personnage de l'équipe, lu dans FIELD/<NOM>.BCX ; 0 : modèle du BSX
+
+
+@dataclass
 class Field:
     nom: str
     sections: dict
@@ -68,6 +79,7 @@ class Field:
     walkmesh: Walkmesh
     tuiles: list
     triggers: dict
+    modeles: list = champ(default_factory=list)
 
 
 def _sections(dat):
@@ -177,13 +189,22 @@ def lire_triggers(dat, debut):
     }
 
 
+def lire_modeles(dat, debut):
+    nb = struct.unpack_from("<BBH", dat, debut)[2]
+    sortie = []
+    for i in range(nb):
+        visage, nb_os, nb_parties, nb_anims, _entree, pnj, _charge, gid = struct.unpack_from("<8B", dat, debut + 4 + 8 * i)
+        sortie.append(ChargeurModele(visage, nb_os, nb_parties, nb_anims, bool(pnj), gid if gid < 128 else gid - 256))
+    return sortie
+
+
 def lire(dat, nom=""):
     s = _sections(dat)
     camera = lire_camera(dat, s["camera"], s["triggers"])
     walkmesh = lire_walkmesh(dat, s["walkmesh"])
     tuiles = lire_tuiles(dat, s["tilemap"])
     triggers = lire_triggers(dat, s["triggers"])
-    return Field(nom or triggers["nom"], s, camera, walkmesh, tuiles, triggers)
+    return Field(nom or triggers["nom"], s, camera, walkmesh, tuiles, triggers, lire_modeles(dat, s["modeles"]))
 
 
 def charger(disque, nom):

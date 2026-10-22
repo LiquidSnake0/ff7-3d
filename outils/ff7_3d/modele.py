@@ -29,7 +29,8 @@ from . import lzs
 
 BASE = 0x80000000
 
-# Personnages de l'équipe : globalModelId -> fichier (même ordre que la table du chargeur).
+# Personnages de l'équipe : globalModelId -> fichier. Vérifié pour 1 (Cloud : 22 os, 15 parties, comme le
+# chargeur de MD1STIN) ; les autres suivent l'ordre supposé de la table de FieldModelLoadBcx.
 BCX = {1: "CLOUD", 2: "EARITH", 3: "BALLET", 4: "TIFA", 5: "RED", 6: "CID", 7: "YUFI", 8: "KETCY", 9: "VINCENT"}
 
 # Tailles des polygones dans les données (FieldModelPoly*), dans l'ordre où elles se suivent.
@@ -172,10 +173,12 @@ def charger_bcx(disque, nom):
     return lire_bcx(lzs.decompresser(disque.fichier(f"FIELD/{nom}.BCX")), nom)
 
 
-def chargeurs(dat, section_modeles):
-    """Section « modèles » du DAT : (faceId, os, parties, anims, entrée, npc, chargé, globalModelId) par modèle."""
-    nb = struct.unpack_from("<BBH", dat, section_modeles)[2]
-    return [struct.unpack_from("<8B", dat, section_modeles + 4 + 8 * i) for i in range(nb)]
+def personnage_du_joueur(champ):
+    """Nom du BCX du premier personnage de l'équipe chargé par l'écran (Cloud au début du jeu), ou None."""
+    for c in champ.modeles:
+        if c.global_id in BCX:
+            return BCX[c.global_id]
+    return None
 
 
 # Repère du modèle (y vers le bas, comme le GTE) vers le monde du terrain (z vers le haut) : la tête,

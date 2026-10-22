@@ -61,6 +61,15 @@ class TestCloud(unittest.TestCase):
                 if pg.couleurs[0][0] > 180 and pg.couleurs[0][2] > 100]
         self.assertLess(np.mean(peau, 0)[1], pts[2].mean(0)[1])  # le visage est du côté -y
 
+    def test_md1stin_charge_cloud_en_premier(self):
+        from ff7_3d import field
+        with Disque(chemins.DISQUE) as d:
+            champ, _mim = field.charger(d, "MD1STIN")
+        self.assertEqual(len(champ.modeles), 10)
+        c = champ.modeles[0]
+        self.assertEqual((c.global_id, c.nb_os, c.nb_parties), (1, 22, 15))
+        self.assertEqual(modele.personnage_du_joueur(champ), "CLOUD")
+
     def test_la_marche_bouge_les_jambes(self):
         r, t = modele.racine(np.eye(3), np.zeros(3), np.zeros(3), 0)
         a = np.concatenate(modele.sommets_monde(self.cloud, modele.matrices(self.cloud, 1, 0, r, t)))
