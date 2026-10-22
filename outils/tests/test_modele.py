@@ -102,3 +102,20 @@ class TestCloud(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPose(unittest.TestCase):
+    """Même convention que port3ds/source/main.c : à la direction 0, le regard est vers -y."""
+
+    def test_direction_vers_le_pas(self):
+        from ff7_3d import modele as m, rendu
+        c = m.Cuisson(1, [], [np.array([[[0.0, -1.0, 0.0]]], dtype=np.float32)], 1.0)
+        for dx, dy in ((1, 0), (0, 1), (-1, -1), (0.3, -2)):
+            p = rendu.poser(c, 0, 0, (0, 0, 0), rendu.direction_vers(dx, dy))[0]
+            n = np.hypot(dx, dy)
+            np.testing.assert_allclose(p[:2], [dx / n, dy / n], atol=0.02)
+
+    def test_poser_sur_le_sol(self):
+        from ff7_3d import modele as m, rendu
+        c = m.Cuisson(1, [], [np.array([[[0.0, 0.0, 5.0]]], dtype=np.float32)], 5.0)
+        np.testing.assert_allclose(rendu.poser(c, 0, 0, (10, 20, 300), 37)[0], [10, 20, 305])
