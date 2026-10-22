@@ -8,7 +8,9 @@ import unittest
 
 import numpy as np
 
-from ff7_3d import camera, chemins, field, fond, lzs, reperes
+import tempfile
+
+from ff7_3d import camera, chemins, field, fond, lzs, profondeur, relief, reperes
 from ff7_3d.disque import Disque
 from ff7_3d.vram import Vram
 
@@ -45,6 +47,50 @@ class TestVram(unittest.TestCase):
         rgba, _stp = v.tuile(tpage, clut, 0, 0, 2)
         self.assertEqual(rgba[0, 1].tolist(), [255, 0, 255, 255])
         self.assertEqual(rgba[0, 0, 3], 0)
+
+
+class TestRecalage(unittest.TestCase):
+    def test_ajuste_une_disparite_affine_en_1_sur_z(self):
+        rng = np.random.default_rng(7)
+        z = rng.uniform(300, 2400, (40, 40))
+        d = (1.0 / z - 0.0003) / 0.0011
+        poids = np.ones_like(z)
+        aberrants = rng.random(z.shape) < 0.05
+        z_reperes = np.where(aberrants, z * 3, z)
+        a, b, ecart = profondeur.ajuster(d, z_reperes, poids)
+        self.assertAlmostEqual(a, 0.0011, places=6)
+        self.assertAlmostEqual(b, 0.0003, places=6)
+        self.assertLess(ecart, 0.01)
+
+
+class TestRelief(unittest.TestCase):
+    def test_tuilage_pica200(self):
+        img = np.arange(16 * 16, dtype=np.uint16).reshape(16, 16)
+        t = relief.tuiler(img)
+        # le premier texel en mémoire est le coin en bas à gauche, le second son voisin de droite,
+        # le troisième celui du dessus (ordre de Morton), et le bloc suivant commence 8 colonnes plus loin
+        self.assertEqual(t[0], img[15, 0])
+        self.assertEqual(t[1], img[15, 1])
+        self.assertEqual(t[2], img[14, 0])
+        self.assertEqual(t[64], img[15, 8])
+        self.assertEqual(sorted(t.tolist()), sorted(img.ravel().tolist()))
+
+    def test_grille_et_paquet(self):
+        z = np.full((64, 64), 1000.0, dtype=np.float32)
+        z[:, 32:] = 2000.0
+        sommets, tris = relief.grille(z, (-32, -32), pas=8)
+        self.assertEqual(len(sommets), 9 * 9)
+        self.assertEqual(len(tris), 8 * 8 * 6)
+        self.assertEqual(sommets[0, :2].tolist(), [-32.0, -32.0])
+        self.assertAlmostEqual(float(sommets[0, 4]), 1.0)  # v = 1 en haut (texture rangée du bas vers le haut)
+        image = np.zeros((64, 64, 4), dtype=np.uint8)
+        with tempfile.TemporaryDirectory() as d:
+            chemin = os.path.join(d, "t.f3d")
+            stats = relief.ecrire(chemin, "TEST", image, z, (-32, -32), 386, 1200.0, pas=8)
+            e = relief.lire_en_tete(chemin)
+            self.assertEqual(os.path.getsize(chemin), stats["octets"])
+        self.assertEqual((e["magie"], e["nom"], e["tex_l"], e["nb_sommets"], e["zoom"]), (b"F3D1", "TEST", 64, 81, 386))
+        self.assertEqual(e["nb_indices"], 8 * 8 * 6)
 
 
 @unittest.skipUnless(DISQUE_PRESENT, "disque du joueur absent")
@@ -101,7 +147,7 @@ class TestMd1stin(unittest.TestCase):
         self.assertGreater(sol.size, 10000)
         # le sol du walkmesh est dans la même plage que les profondeurs des tuiles de couche 2 (4 x ID)
         self.assertTrue(250 < sol.min() < sol.max() < 2400)
-        self.assertEqual(set(np.unique(rp.z_tuiles[np.isfinite(rp.z_tuiles)])), {4.0, 608.0, 1176.0, 2176.0})
+        self.assertEqual(set(np.unique(rp.z_tuiles[np.isfinite(rp.z_tuiles)])), {608.0, 1176.0, 2176.0})
         self.assertTrue(np.isinf(rp.z_occlusion[r.couche == 1]).all())
 
 
