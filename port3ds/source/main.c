@@ -779,6 +779,7 @@ int main(int argc, char** argv)
 	float cx = 0.0f, cy = 0.0f;
 	float decal_x = 0.0f, decal_y = 0.0f;
 	int stats = 1;
+	float ms_pose = 0.0f; /* CPU time of personnage_poser (projection of Cloud's vertices), smoothed */
 	u64 dernier = 0;
 	float ms = 0.0f;
 
@@ -888,7 +889,9 @@ int main(int argc, char** argv)
 		if (et.temoin && r->a_perso)
 		{
 			float px, py, ph, pz;
+			u64 t0 = svcGetSystemTick();
 			personnage_poser(&r->perso, &et.cam, et.pied, et.angle, et.anim, et.image, &px, &py, &ph, &pz);
+			ms_pose = ms_pose * 0.9f + (float)(svcGetSystemTick() - t0) / CPU_TICKS_PER_MSEC * 0.1f;
 			et.convergence = et.convergence < 0 ? pz * et.facteur : et.convergence + (pz * et.facteur - et.convergence) * 0.1f;
 			/* the view follows him, centred on his waist, like the field camera scroll */
 			cx = px + decal_x;
@@ -947,6 +950,8 @@ int main(int argc, char** argv)
 			if (r->a_perso)
 				printf("Cloud : %6.0f %6.0f %5.0f a%d i%2d  \n", et.pied[0], et.pied[1], et.pied[2], et.anim,
 				       (int)et.image % (r->perso.nb_images[et.anim] ? r->perso.nb_images[et.anim] : 1));
+			if (r->a_perso)
+				printf("pose de Cloud : %4.2f ms CPU        \n", ms_pose);
 			else
 				printf("temoin : %6.0f %6.0f %5.0f (ZR)  \n", et.pied[0], et.pied[1], et.pied[2]);
 			printf("cartes d'occlusion : %u            \n", r->nb_cartes);
