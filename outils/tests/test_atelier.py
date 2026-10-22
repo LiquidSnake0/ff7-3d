@@ -8,7 +8,7 @@ import unittest
 
 import numpy as np
 
-from ff7_3d import camera, chemins, field, fond, lzs, reperes
+from ff7_3d import camera, chemins, field, fond, lzs, profondeur, reperes
 from ff7_3d.disque import Disque
 from ff7_3d.vram import Vram
 
@@ -45,6 +45,20 @@ class TestVram(unittest.TestCase):
         rgba, _stp = v.tuile(tpage, clut, 0, 0, 2)
         self.assertEqual(rgba[0, 1].tolist(), [255, 0, 255, 255])
         self.assertEqual(rgba[0, 0, 3], 0)
+
+
+class TestRecalage(unittest.TestCase):
+    def test_ajuste_une_disparite_affine_en_1_sur_z(self):
+        rng = np.random.default_rng(7)
+        z = rng.uniform(300, 2400, (40, 40))
+        d = (1.0 / z - 0.0003) / 0.0011
+        poids = np.ones_like(z)
+        aberrants = rng.random(z.shape) < 0.05
+        z_reperes = np.where(aberrants, z * 3, z)
+        a, b, ecart = profondeur.ajuster(d, z_reperes, poids)
+        self.assertAlmostEqual(a, 0.0011, places=6)
+        self.assertAlmostEqual(b, 0.0003, places=6)
+        self.assertLess(ecart, 0.01)
 
 
 @unittest.skipUnless(DISQUE_PRESENT, "disque du joueur absent")
@@ -101,7 +115,7 @@ class TestMd1stin(unittest.TestCase):
         self.assertGreater(sol.size, 10000)
         # le sol du walkmesh est dans la même plage que les profondeurs des tuiles de couche 2 (4 x ID)
         self.assertTrue(250 < sol.min() < sol.max() < 2400)
-        self.assertEqual(set(np.unique(rp.z_tuiles[np.isfinite(rp.z_tuiles)])), {4.0, 608.0, 1176.0, 2176.0})
+        self.assertEqual(set(np.unique(rp.z_tuiles[np.isfinite(rp.z_tuiles)])), {608.0, 1176.0, 2176.0})
         self.assertTrue(np.isinf(rp.z_occlusion[r.couche == 1]).all())
 
 
