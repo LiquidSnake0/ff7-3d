@@ -38,6 +38,7 @@ import numpy as np
 MAGIE = b"F3D1"
 VERSION = 2
 ID_FOND = 4095
+DISCONTINUITE = 1.15
 TAILLE_EN_TETE = 64
 
 
@@ -75,12 +76,19 @@ def grille(z, origine, pas=4):
     if nx * ny > 65535:
         raise ValueError("trop de sommets pour des indices sur 16 bits : augmenter le pas")
     yy, xx = np.meshgrid(gy, gx, indexing="ij")
-    # profondeur au sommet : médiane des 4 pixels qui l'entourent (bords pris dans l'image)
+    # profondeur au sommet : médiane des pixels de la maille qui l'entoure ; sur une discontinuité (écart de
+    # plus de 15 %), on prend le plus proche, pour que la silhouette d'un objet au premier plan reste nette
+    # au lieu de s'étirer vers le fond (le « rideau » est alors porté par le fond, moins visible)
     voisins = []
-    for dy in (-1, 0):
-        for dx in (-1, 0):
+    demi = max(pas // 2, 1)
+    for dy in range(-demi, demi):
+        for dx in range(-demi, demi):
             voisins.append(z[np.clip(yy + dy, 0, h - 1), np.clip(xx + dx, 0, l - 1)])
-    zs = np.median(np.stack(voisins), axis=0)
+    voisins = np.stack(voisins)
+    zs = np.median(voisins, axis=0)
+    zmin, zmax = voisins.min(axis=0), voisins.max(axis=0)
+    rupture = zmax > zmin * DISCONTINUITE
+    zs = np.where(rupture, zmin, zs)
     ox, oy = origine
     sommets = np.stack([xx + ox, yy + oy, zs, xx / l, 1.0 - yy / h], axis=-1).reshape(-1, 5).astype(np.float32)
     i = np.arange(ny - 1)[:, None] * nx + np.arange(nx - 1)[None, :]
