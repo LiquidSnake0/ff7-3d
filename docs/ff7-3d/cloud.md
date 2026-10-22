@@ -1,7 +1,8 @@
 # Cloud on the 3DS: field models
 
 The player's character comes from the player's disc, like the backgrounds: `FIELD/CLOUD.BCX` (LZS), baked
-by the workshop into the field package (section `PERS`, package version 4), drawn by the 3DS viewer.
+by the workshop into the field package (section `PERS`, since package version 4; the exits came with version 5),
+drawn by the 3DS viewer.
 
 ## What the field data says (read in ff7-decomp, not modified)
 
@@ -49,6 +50,7 @@ Also to check on the console: handedness (is Cloud mirrored? his pauldron is on 
   ~300 vertices with the field camera on the CPU (like `placer_temoin` did) and draws the triangles with
   `source/modele.v.pica`, the same projection, depth substrate and stereo as the relief. The depth test runs
   against the occlusion cards, so he passes behind layer-2 tiles where the PS1 did.
+- Cost: the bottom screen shows the CPU time of the pose ("pose de Cloud"), to compare with the frame time.
 - Speed: about 3 world units per frame walking, 6 running (B); half an animation frame per 60 Hz frame (the PS1
   field plays one per 30 Hz frame).
 
@@ -58,3 +60,5 @@ Also to check on the console: handedness (is Cloud mirrored? his pauldron is on 
   textured face polygons are drawn with their vertex colours for now.
 - Lighting (`KawaiLightingApplyToModel` with the field's three lights from the BSX): raw PS1 colours for now.
 - The non-party models of the field (BSX: Jessie, Biggs, Wedge, the guards on `MD1STIN`).
+- In milestone 2 the engine's own `FieldModelAnimCalcMtrxs` should take over; it is still assembly upstream and
+  `NOT_IMPLEMENTED` in the PC build, so the C port of this reading may stand in for it (`jalon2-psyz-3ds.md`).
