@@ -572,9 +572,36 @@ typedef struct
 	float angle, image; /* Cloud: facing (radians, 0 = towards -y) and animation frame */
 	int anim;           /* 0 standing, 1 walking, 2 running */
 	int temoin;         /* the character is shown (ZR) */
-	float convergence;
+	float convergence;  /* depth that sits on the screen plane, this frame */
+	float facteur;      /* L / R: the convergence relative to Cloud's depth (1 = Cloud on the screen plane) */
 	float xmin, xmax, ymin, ymax; /* where the view centre may go, so the window stays on the background */
 } Etat;
+
+#define REGLAGES DOSSIER "/reglages.txt"
+
+/* The stereo setting the player chose with L / R, kept across fields and sessions. */
+static float lire_facteur(void)
+{
+	float f = 1.0f;
+	FILE* fic = fopen(REGLAGES, "r");
+	if (fic)
+	{
+		if (fscanf(fic, "convergence %f", &f) != 1 || f < 0.25f || f > 4.0f)
+			f = 1.0f;
+		fclose(fic);
+	}
+	return f;
+}
+
+static void ecrire_facteur(float f)
+{
+	FILE* fic = fopen(REGLAGES, "w");
+	if (fic)
+	{
+		fprintf(fic, "convergence %.3f\n", f);
+		fclose(fic);
+	}
+}
 
 static void attendre_start(const char* message)
 {
@@ -595,7 +622,7 @@ static int entrer(Etat* et, const char* chemin)
 	relief_liberer(r);
 	if (!charger_relief(chemin, r))
 		return 0;
-	et->convergence = r->e.z_convergence;
+	et->convergence = -1.0f; /* set on the first frame, without easing */
 	memcpy(et->cam.axes, r->axes, sizeof(et->cam.axes));
 	memcpy(et->cam.trans, r->trans, sizeof(et->cam.trans));
 	et->cam.zoom = r->e.zoom;
@@ -775,6 +802,7 @@ int main(int argc, char** argv)
 			return 0;
 		}
 	}
+	et.facteur = lire_facteur();
 	if (!entrer(&et, chemin))
 	{
 		printf("Paquet illisible :\n%s\n", chemin);
@@ -849,14 +877,19 @@ int main(int argc, char** argv)
 		decal_y += ((tenu & KEY_DDOWN) ? 2 : 0) - ((tenu & KEY_DUP) ? 2 : 0);
 		if (appui & KEY_ZR)
 			et.temoin = !et.temoin && r->nb_triangles;
+		/* the convergence follows Cloud: he stays on the screen plane, the background recedes behind him and what
+		 * is nearer than him comes out; L / R move that plane relative to him, and the choice is saved */
 		if (tenu & KEY_R)
-			et.convergence *= 1.02f;
+			et.facteur = et.facteur * 1.02f > 4.0f ? 4.0f : et.facteur * 1.02f;
 		if (tenu & KEY_L)
-			et.convergence /= 1.02f;
+			et.facteur = et.facteur / 1.02f < 0.25f ? 0.25f : et.facteur / 1.02f;
+		if (hidKeysUp() & (KEY_L | KEY_R))
+			ecrire_facteur(et.facteur);
 		if (et.temoin && r->a_perso)
 		{
 			float px, py, ph, pz;
 			personnage_poser(&r->perso, &et.cam, et.pied, et.angle, et.anim, et.image, &px, &py, &ph, &pz);
+			et.convergence = et.convergence < 0 ? pz * et.facteur : et.convergence + (pz * et.facteur - et.convergence) * 0.1f;
 			/* the view follows him, centred on his waist, like the field camera scroll */
 			cx = px + decal_x;
 			cy = 0.5f * (py + ph) + decal_y;
@@ -865,6 +898,8 @@ int main(int argc, char** argv)
 		{
 			float px, py;
 			placer_temoin(r, et.pied, &px, &py);
+			et.convergence = et.convergence < 0 ? r->e.z_convergence * et.facteur
+			                                    : et.convergence + (r->e.z_convergence * et.facteur - et.convergence) * 0.1f;
 			/* the view follows the character, like the field camera scroll */
 			cx = px + decal_x;
 			cy = py - 40.0f + decal_y;
@@ -873,6 +908,8 @@ int main(int argc, char** argv)
 		{
 			cx = decal_x;
 			cy = decal_y;
+			et.convergence = et.convergence < 0 ? r->e.z_convergence * et.facteur
+			                                    : et.convergence + (r->e.z_convergence * et.facteur - et.convergence) * 0.1f;
 		}
 		cx = cx < et.xmin ? et.xmin : (cx > et.xmax ? et.xmax : cx);
 		cy = cy < et.ymin ? et.ymin : (cy > et.ymax ? et.ymax : cy);
@@ -905,7 +942,7 @@ int main(int argc, char** argv)
 			       (unsigned long)(r->e.nb_indices / 3));
 			printf("image : %5.1f ms (%4.1f i/s)        \n", ms, ms > 0 ? 1000.0f / ms : 0.0f);
 			printf("curseur 3D : %3.0f %%  ecart : %4.1f px    \n", curseur * 100.0f, 2 * k);
-			printf("convergence z : %6.0f (L / R)       \n", et.convergence);
+			printf("convergence z : %6.0f x%.2f (L / R) \n", et.convergence, et.facteur);
 			printf("vue : %5.0f, %5.0f (pad)          \n", cx, cy);
 			if (r->a_perso)
 				printf("Cloud : %6.0f %6.0f %5.0f a%d i%2d  \n", et.pied[0], et.pied[1], et.pied[2], et.anim,
