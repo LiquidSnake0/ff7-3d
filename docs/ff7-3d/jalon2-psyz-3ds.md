@@ -95,10 +95,38 @@ code where it fits (keeping its GPL-3.0 header):
   geometry has one (Cloud, NPCs), otherwise its ordering-table slot, so the original order survives as depth.
   On a field this is exactly the occlusion depth of milestone 1 (`4 x tile ID` for layer 2).
 - **Stereo:** the frame's commands are journaled and the right eye replays them through a second projection.
-- **Field backgrounds:** `AddBackgroundToRender` is the one entry point the 3DS build swaps (by linking a
-  different object, `src/` untouched): it draws the relief package of the current field instead of pushing the
+- **Field backgrounds:** `AddBackgroundToRender` is the one entry point the 3DS build swaps, `src/` untouched:
+  it is defined in `src/field/field_bg.c` and called from `src/field/field_loop.c`, another object, so
+  `-Wl,--wrap=AddBackgroundToRender` routes the call to a `__wrap_AddBackgroundToRender` of `port3ds/`. It draws the relief package of the current field instead of pushing the
   background tiles, and writes the occlusion cards. Everything else of the field (models, dialogue windows,
   fades) goes through the packet path.
 
 The milestone 1 viewer stays the reference: same package, same shaders (`relief.v.pica`, `modele.v.pica`), same
 projection and convergence rules.
+
+## Steps
+
+| # | Step | Done when |
+|---|---|---|
+| 0 | Address rewrite pass (option 1) on the PC build | `ff7` on PC runs `MD1STIN` with the rewritten sources, nothing mapped at `0x80010000` |
+| 1 | `n3ds.cmake`, startup, file I/O on `sdmc:`, logs through `3dslink` | the PsyZ boot logo of the PC build prints its log lines on the console |
+| 2 | Draw backend, packet path only (no texture cache: flat colours) | the boot logo and the menus draw, upside right, 400x240 |
+| 3 | Texture cache from the shadow VRAM | the field background tiles draw as on the PC build (before any relief) |
+| 4 | Pads, then audio (`ndsp`, software SPU on the second core) | Cloud walks on `MD1STIN` with the engine's own walkmesh code; music plays |
+| 5 | `AddBackgroundToRender` wrapped: relief package + occlusion cards | `MD1STIN` in stereo, Cloud driven by the field scripts, passing behind the same pillars as in milestone 1 |
+| 6 | Measures and budget | 30 fps held on `MD1STIN` and `MD1_1` (the PS1 field runs at 30), memory under the New 3DS application budget |
+
+Not before step 5: battles, the world map, FMVs, saving (`sceUtilitySavedata` is not done on the PSP either).
+
+## Open questions
+
+- Are all `0x80xxxxxx` literals pointers? A list per file, built by the rewrite pass in a dry-run mode, decides it.
+- `FieldModelAnimCalcMtrxs` and `FieldModelPrepareRender` are `NOT_IMPLEMENTED` in `src/pc/stubs_field.c`
+  (still assembly upstream). Until upstream decompiles them, the 3DS build can draw the field models with
+  the workshop's floating-point reading (`outils/ff7_3d/modele.py`, ported to C) behind the same names in
+  `port3ds/`, never in `src/`.
+- Memory: 2 MB of PS1 RAM, 1 MB of shadow VRAM, the relief package (about 1.5 MB per field with Cloud) and the
+  texture cache must fit next to citro3d's command buffers; the New 3DS gives an application about 124 MB, so
+  the budget is the linear memory for vertex buffers and textures, not the total.
+- How far PsyZ's software GTE costs on the 804 MHz ARM11: measure at step 2 with the boot logo, as the PSP
+  README did (12 fps to 172 fps once the SPU moved off the main CPU).
