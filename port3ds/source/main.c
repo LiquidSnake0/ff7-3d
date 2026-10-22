@@ -12,7 +12,8 @@
  *
  * Controls: the circle pad walks Cloud on the field's walkmesh (B held: he runs; the view follows him), the
  * D-pad shifts the view, L / R move the convergence plane, ZR hides him (the pad then scrolls the view),
- * SELECT toggles the frame stats, START quits. A package without a character (written with
+ * Y opens the field list, SELECT toggles the frame stats, START quits. At start-up the bottom screen lists the
+ * packages on the SD card. A package without a character (written with
  * --sans-personnage, or before version 4) falls back to the red test quad.
  */
 #include <3ds.h>
@@ -52,6 +53,18 @@ typedef struct
 	float z_min, z_max;
 } __attribute__((packed)) EnTeteF3d;
 
+/* One exit of the field (package version 5): crossing the line loads <cible>.f3d (outils/ff7_3d/field.py, Porte). */
+typedef struct
+{
+	s16 ligne[2][3];
+	s16 arrivee[2];
+	s16 triangle;
+	char cible[9];
+	u8 direction;
+} __attribute__((packed)) PorteF3d;
+
+#define PORTES_MAX 16
+
 typedef struct
 {
 	EnTeteF3d e;
@@ -74,6 +87,9 @@ typedef struct
 	/* The player's character (package version 4). */
 	Personnage perso;
 	int a_perso;
+	/* Exits to other fields (package version 5). */
+	PorteF3d portes[PORTES_MAX];
+	u16 nb_portes;
 } Relief;
 
 /* One card of the package, as written by outils/ff7_3d/relief.py. */
@@ -93,23 +109,76 @@ static int s_uProjection, s_uH, s_uStereo;
 /* Total disparity at infinity, in PS1 pixels, at full slider (CTR-3D uses 12). */
 static const float ECART_STEREO = 8.0f; /* 12 (CTR-3D) was too strong on FF7's backgrounds at full slider */
 
-static int chercher_paquet(char* chemin, size_t taille)
+#define PAQUETS_MAX 64
+
+/* The .f3d packages on the SD card, sorted by name. */
+static int lister_paquets(char noms[][32])
 {
 	DIR* d = opendir(DOSSIER);
 	struct dirent* e;
+	int n = 0, i, j;
 	if (!d)
 		return 0;
-	while ((e = readdir(d)) != NULL)
+	while ((e = readdir(d)) != NULL && n < PAQUETS_MAX)
 	{
-		size_t n = strlen(e->d_name);
-		if (n > 4 && strcmp(e->d_name + n - 4, ".f3d") == 0)
-		{
-			snprintf(chemin, taille, "%s/%.200s", DOSSIER, e->d_name);
-			closedir(d);
-			return 1;
-		}
+		size_t l = strlen(e->d_name);
+		if (l > 4 && l < 32 && strcmp(e->d_name + l - 4, ".f3d") == 0)
+			snprintf(noms[n++], 32, "%s", e->d_name);
 	}
 	closedir(d);
+	for (i = 1; i < n; i++)
+		for (j = i; j > 0 && strcmp(noms[j - 1], noms[j]) > 0; j--)
+		{
+			char t[32];
+			memcpy(t, noms[j], 32);
+			memcpy(noms[j], noms[j - 1], 32);
+			memcpy(noms[j - 1], t, 32);
+		}
+	return n;
+}
+
+/*
+ * Field choice on the bottom screen: the pad or the D-pad moves, A loads, START quits. `courant` is the field
+ * shown so far (selected first). Returns 1 with the chosen path, 0 to quit, -1 when there is no package.
+ */
+static int choisir_paquet(char* chemin, size_t taille, const char* courant)
+{
+	static char noms[PAQUETS_MAX][32];
+	int n = lister_paquets(noms), choix = 0, i, attente = 0;
+	if (!n)
+		return -1;
+	for (i = 0; i < n && courant; i++)
+		if (strstr(courant, noms[i]))
+			choix = i;
+	consoleClear();
+	while (aptMainLoop())
+	{
+		u32 appui, tenu;
+		circlePosition pad;
+		hidScanInput();
+		appui = hidKeysDown();
+		tenu = hidKeysHeld();
+		hidCircleRead(&pad);
+		if (appui & KEY_START)
+			return 0;
+		if (appui & KEY_A)
+		{
+			snprintf(chemin, taille, "%s/%s", DOSSIER, noms[choix]);
+			consoleClear();
+			return 1;
+		}
+		if (attente > 0)
+			attente--;
+		else if ((tenu & KEY_DDOWN) || pad.dy < -80)
+			choix = (choix + 1) % n, attente = 10;
+		else if ((tenu & KEY_DUP) || pad.dy > 80)
+			choix = (choix + n - 1) % n, attente = 10;
+		printf("\x1b[1;0Hff7-3d - choisir un ecran\n\n");
+		for (i = 0; i < n && i < 20; i++)
+			printf("%s %-28s\n", i == choix ? ">" : " ", noms[i]);
+		printf("\n A charger   START quitter\n");
+		gspWaitForVBlank();
+	}
 	return 0;
 }
 
@@ -193,6 +262,22 @@ static int charger_occlusion(FILE* f, Relief* r)
 			return 0;
 		r->a_perso = etat;
 	}
+	if (r->e.version >= 5)
+	{
+		char magie[4];
+		u16 n, i;
+		if (fread(magie, 4, 1, f) != 1 || memcmp(magie, "PORT", 4) != 0 || fread(&n, 2, 1, f) != 1)
+			return 0;
+		for (i = 0; i < n; i++)
+		{
+			PorteF3d p;
+			if (fread(&p, sizeof(p), 1, f) != 1)
+				return 0;
+			p.cible[8] = 0;
+			if (r->nb_portes < PORTES_MAX)
+				r->portes[r->nb_portes++] = p;
+		}
+	}
 
 	r->temoin = linearAlloc(4 * 5 * sizeof(float));
 	r->idx_temoin = linearAlloc(6 * sizeof(u16));
@@ -215,7 +300,7 @@ static int charger_relief(const char* chemin, Relief* r)
 	void* tampon;
 	if (!f)
 		return 0;
-	if (fread(&r->e, sizeof(r->e), 1, f) != 1 || memcmp(r->e.magie, "F3D1", 4) != 0 || r->e.version < 3 || r->e.version > 4)
+	if (fread(&r->e, sizeof(r->e), 1, f) != 1 || memcmp(r->e.magie, "F3D1", 4) != 0 || r->e.version < 3 || r->e.version > 5)
 	{
 		fclose(f);
 		return 0;
@@ -455,23 +540,247 @@ static void vecteur_oeil(float k, float convergence, float v[4])
 	v[3] = 2.0f * a;
 }
 
-int main(int argc, char** argv)
+static void relief_liberer(Relief* r)
+{
+	if (r->texture.data)
+		C3D_TexDelete(&r->texture);
+	if (r->masque.data)
+		C3D_TexDelete(&r->masque);
+	if (r->cartes)
+		linearFree(r->cartes);
+	if (r->idx_cartes)
+		linearFree(r->idx_cartes);
+	if (r->temoin)
+		linearFree(r->temoin);
+	if (r->idx_temoin)
+		linearFree(r->idx_temoin);
+	free(r->triangles);
+	personnage_liberer(&r->perso);
+	if (r->sommets)
+		linearFree(r->sommets);
+	if (r->indices)
+		linearFree(r->indices);
+	memset(r, 0, sizeof(*r));
+}
+
+/* Everything the viewer keeps about the field it shows and the character in it. */
+typedef struct
 {
 	Relief relief;
+	CameraTerrain cam;
+	float pied[3];
+	float angle, image; /* Cloud: facing (radians, 0 = towards -y) and animation frame */
+	int anim;           /* 0 standing, 1 walking, 2 running */
+	int temoin;         /* the character is shown (ZR) */
+	float convergence;  /* depth that sits on the screen plane, this frame */
+	float facteur;      /* L / R: the convergence relative to Cloud's depth (1 = Cloud on the screen plane) */
+	float xmin, xmax, ymin, ymax; /* where the view centre may go, so the window stays on the background */
+} Etat;
+
+#define REGLAGES DOSSIER "/reglages.txt"
+
+/* The stereo setting the player chose with L / R, kept across fields and sessions. */
+static float lire_facteur(void)
+{
+	float f = 1.0f;
+	FILE* fic = fopen(REGLAGES, "r");
+	if (fic)
+	{
+		if (fscanf(fic, "convergence %f", &f) != 1 || f < 0.25f || f > 4.0f)
+			f = 1.0f;
+		fclose(fic);
+	}
+	return f;
+}
+
+static void ecrire_facteur(float f)
+{
+	FILE* fic = fopen(REGLAGES, "w");
+	if (fic)
+	{
+		fprintf(fic, "convergence %.3f\n", f);
+		fclose(fic);
+	}
+}
+
+static void attendre_start(const char* message)
+{
+	printf("%s\n\nSTART pour quitter.\n", message);
+	while (aptMainLoop())
+	{
+		hidScanInput();
+		if (hidKeysDown() & KEY_START)
+			break;
+		gspWaitForVBlank();
+	}
+}
+
+/* Loads a package and stands the character at the centre of the walkmesh, facing the camera. */
+static int entrer(Etat* et, const char* chemin)
+{
+	Relief* r = &et->relief;
+	relief_liberer(r);
+	if (!charger_relief(chemin, r))
+		return 0;
+	et->convergence = -1.0f; /* set on the first frame, without easing */
+	memcpy(et->cam.axes, r->axes, sizeof(et->cam.axes));
+	memcpy(et->cam.trans, r->trans, sizeof(et->cam.trans));
+	et->cam.zoom = r->e.zoom;
+	/* first look: facing the camera, so his face shows */
+	et->angle = atan2f(-r->axes[2][0], r->axes[2][1]);
+	et->anim = 0;
+	et->image = 0.0f;
+	et->temoin = r->nb_triangles != 0;
+	if (r->nb_triangles)
+	{
+		/* start at the centre of the walkmesh triangle that falls nearest the middle of the background: the
+		 * walkmesh often reaches past the picture (MD1_1: up to 290 pixels on the right), so its own centre may
+		 * be off screen (same rule as the workshop's preview, outils/ff7_3d/rendu.py, depart) */
+		int t, k, meilleur = 0;
+		float mx = r->e.ox + r->e.tex_l * 0.5f, my = r->e.oy + r->e.tex_h * 0.5f, d_min = 1e30f;
+		for (t = 0; t < r->nb_triangles; t++)
+		{
+			float c[3], sx, sy, d;
+			for (k = 0; k < 3; k++)
+				c[k] = (r->triangles[t][0][k] + r->triangles[t][1][k] + r->triangles[t][2][k]) / 3.0f;
+			projeter(r, c, &sx, &sy);
+			d = (sx - mx) * (sx - mx) + (sy - my) * (sy - my);
+			if (d < d_min)
+				d_min = d, meilleur = t;
+		}
+		for (k = 0; k < 3; k++)
+			et->pied[k] = (r->triangles[meilleur][0][k] + r->triangles[meilleur][1][k] + r->triangles[meilleur][2][k]) / 3.0f;
+	}
+	et->xmin = r->e.ox + ECRAN_L / 2;
+	et->xmax = r->e.ox + r->e.tex_l - ECRAN_L / 2;
+	et->ymin = r->e.oy + ECRAN_H / 2;
+	et->ymax = r->e.oy + r->e.tex_h - ECRAN_H / 2;
+	if (et->xmin > et->xmax)
+		et->xmin = et->xmax = r->e.ox + r->e.tex_l / 2;
+	if (et->ymin > et->ymax)
+		et->ymin = et->ymax = r->e.oy + r->e.tex_h / 2;
+	consoleClear();
+	return 1;
+}
+
+/* Walk on the walkmesh: the pad moves the character along the screen's right and forward axes, projected on the
+ * ground; a step that leaves the walkmesh is refused, like a blocked edge. */
+static void marcher(Etat* et, const circlePosition* pad, u32 tenu)
+{
+	Relief* r = &et->relief;
+	float dx = pad->dx / 156.0f, dy = pad->dy / 156.0f, nx, ny, nz, avant[2], droite[2], n;
+	/* walk about 3 world units per frame (Cloud is 126 high), run twice that with B */
+	float vitesse = (tenu & KEY_B) ? 6.0f : 3.0f;
+	float mx, my, force;
+	droite[0] = r->axes[0][0];
+	droite[1] = r->axes[0][1];
+	avant[0] = r->axes[2][0];
+	avant[1] = r->axes[2][1];
+	n = sqrtf(droite[0] * droite[0] + droite[1] * droite[1]);
+	if (n > 0)
+		droite[0] /= n, droite[1] /= n;
+	n = sqrtf(avant[0] * avant[0] + avant[1] * avant[1]);
+	if (n > 0)
+		avant[0] /= n, avant[1] /= n;
+	mx = dx * droite[0] + dy * avant[0];
+	my = dx * droite[1] + dy * avant[1];
+	force = sqrtf(dx * dx + dy * dy);
+	if (force > 1.0f)
+		force = 1.0f;
+	if (force <= 0.15f)
+	{
+		et->anim = 0;
+		et->image = 0.0f;
+		return;
+	}
+	n = sqrtf(mx * mx + my * my) + 1e-6f;
+	nx = et->pied[0] + vitesse * mx / n * force;
+	ny = et->pied[1] + vitesse * my / n * force;
+	/* turn towards the step; at angle 0 he looks towards -y */
+	et->angle = atan2f(mx, -my);
+	et->anim = (tenu & KEY_B) ? 2 : 1;
+	/* the PS1 field plays one animation frame per 30 Hz frame: half a frame per 60 Hz frame */
+	et->image += 0.5f * (force < 0.5f ? 0.5f : force);
+	if (sol(r, nx, ny, &nz))
+	{
+		et->pied[0] = nx;
+		et->pied[1] = ny;
+		et->pied[2] = nz;
+	}
+}
+
+/* Does the step a -> b cross the segment p -> q (on the ground plane)? */
+static int croise(float ax, float ay, float bx, float by, float px, float py, float qx, float qy)
+{
+	float d1 = (qx - px) * (ay - py) - (qy - py) * (ax - px);
+	float d2 = (qx - px) * (by - py) - (qy - py) * (bx - px);
+	float d3 = (bx - ax) * (py - ay) - (by - ay) * (px - ax);
+	float d4 = (bx - ax) * (qy - ay) - (by - ay) * (qx - ax);
+	return ((d1 > 0) != (d2 > 0)) && ((d3 > 0) != (d4 > 0));
+}
+
+/*
+ * Field exits: when the last step crossed an exit line, load the target field if its package is on the SD card and
+ * stand Cloud where the game puts him (the exit's arrival point and direction). Returns 1 when the field changed.
+ * Without the package, the step is undone and the bottom screen says which field to generate.
+ */
+static int franchir(Etat* et, const float avant[3], char* chemin, size_t taille)
+{
+	Relief* r = &et->relief;
+	u16 i;
+	for (i = 0; i < r->nb_portes; i++)
+	{
+		const PorteF3d* p = &r->portes[i];
+		char cible[256], nom[16];
+		PorteF3d porte;
+		FILE* f;
+		int k;
+		float z;
+		if (!croise(avant[0], avant[1], et->pied[0], et->pied[1], p->ligne[0][0], p->ligne[0][1], p->ligne[1][0],
+		            p->ligne[1][1]))
+			continue;
+		for (k = 0; k < 15 && p->cible[k]; k++)
+			nom[k] = (p->cible[k] >= 'A' && p->cible[k] <= 'Z') ? p->cible[k] - 'A' + 'a' : p->cible[k];
+		nom[k] = 0;
+		snprintf(cible, sizeof(cible), "%s/%s.f3d", DOSSIER, nom);
+		f = fopen(cible, "rb");
+		if (!f)
+		{
+			memcpy(et->pied, avant, sizeof(et->pied));
+			printf("\x1b[27;0H%-8s absent : generez-le    \navec outils/atelier.py %-8s  ", p->cible, p->cible);
+			return 0;
+		}
+		fclose(f);
+		porte = *p; /* r is reloaded below */
+		if (!entrer(et, cible))
+			return -1;
+		snprintf(chemin, taille, "%s", cible);
+		et->pied[0] = porte.arrivee[0];
+		et->pied[1] = porte.arrivee[1];
+		if (sol(&et->relief, et->pied[0], et->pied[1], &z))
+			et->pied[2] = z;
+		else if (porte.triangle >= 0 && porte.triangle < et->relief.nb_triangles)
+		{
+			const s16(*t)[3] = et->relief.triangles[porte.triangle];
+			et->pied[2] = (t[0][2] + t[1][2] + t[2][2]) / 3.0f;
+		}
+		/* the entity's direction byte: 256 steps per turn, the same rotation as the workshop's (rendu.py) */
+		et->angle = porte.direction * (2.0f * 3.14159265f / 256.0f);
+		return 1;
+	}
+	return 0;
+}
+
+int main(int argc, char** argv)
+{
+	static Etat et;
 	char chemin[256];
 	C3D_RenderTarget *gauche, *droite;
-	float cx = 0.0f, cy = 0.0f, convergence;
-	float pied[3] = {0, 0, 0};
+	float cx = 0.0f, cy = 0.0f;
 	float decal_x = 0.0f, decal_y = 0.0f;
-	int temoin = 1;
-	float xmin, xmax, ymin, ymax;
 	int stats = 1;
 	u64 dernier = 0;
 	float ms = 0.0f;
-	/* Cloud: facing angle (radians, 0 = towards -y), animation (0 standing, 1 walking, 2 running) and frame */
-	float angle = 0.0f, image = 0.0f;
-	int anim = 0;
-	CameraTerrain cam;
 
 	gfxInitDefault();
 	gfxSet3D(true);
@@ -481,72 +790,27 @@ int main(int argc, char** argv)
 	printf("ff7-3d - visualiseur de relief\n\n");
 	if (argc > 1)
 		snprintf(chemin, sizeof(chemin), "%s", argv[1]);
-	else if (!chercher_paquet(chemin, sizeof(chemin)))
-	{
-		printf("Aucun paquet .f3d dans\n%s\n\nGenerez-le sur PC avec\noutils/atelier.py (voir port3ds/README.md).\n\nSTART pour quitter.\n",
-		       DOSSIER);
-		while (aptMainLoop())
-		{
-			hidScanInput();
-			if (hidKeysDown() & KEY_START)
-				break;
-			gspWaitForVBlank();
-		}
-		C3D_Fini();
-		gfxExit();
-		return 0;
-	}
-	memset(&relief, 0, sizeof(relief));
-	if (!charger_relief(chemin, &relief))
-	{
-		printf("Paquet illisible :\n%s\n\nSTART pour quitter.\n", chemin);
-		while (aptMainLoop())
-		{
-			hidScanInput();
-			if (hidKeysDown() & KEY_START)
-				break;
-			gspWaitForVBlank();
-		}
-		C3D_Fini();
-		gfxExit();
-		return 0;
-	}
-	convergence = relief.e.z_convergence;
-	memcpy(cam.axes, relief.axes, sizeof(cam.axes));
-	memcpy(cam.trans, relief.trans, sizeof(cam.trans));
-	cam.zoom = relief.e.zoom;
-	/* first look: facing the camera, so his face shows */
-	angle = atan2f(-relief.axes[2][0], relief.axes[2][1]);
-	if (relief.nb_triangles)
-	{
-		/* start at the centre of the walkmesh when it is on the floor, else at the centre of its first
-		 * triangle */
-		int k, t, v;
-		float z;
-		for (k = 0; k < 3; k++)
-		{
-			float somme = 0;
-			for (t = 0; t < relief.nb_triangles; t++)
-				for (v = 0; v < 3; v++)
-					somme += relief.triangles[t][v][k];
-			pied[k] = somme / (3.0f * relief.nb_triangles);
-		}
-		if (sol(&relief, pied[0], pied[1], &z))
-			pied[2] = z;
-		else
-			for (k = 0; k < 3; k++)
-				pied[k] = (relief.triangles[0][0][k] + relief.triangles[0][1][k] + relief.triangles[0][2][k]) / 3.0f;
-	}
 	else
-		temoin = 0;
-	xmin = relief.e.ox + ECRAN_L / 2;
-	xmax = relief.e.ox + relief.e.tex_l - ECRAN_L / 2;
-	ymin = relief.e.oy + ECRAN_H / 2;
-	ymax = relief.e.oy + relief.e.tex_h - ECRAN_H / 2;
-	if (xmin > xmax)
-		xmin = xmax = relief.e.ox + relief.e.tex_l / 2;
-	if (ymin > ymax)
-		ymin = ymax = relief.e.oy + relief.e.tex_h / 2;
+	{
+		int choix = choisir_paquet(chemin, sizeof(chemin), NULL);
+		if (choix < 0)
+			attendre_start("Aucun paquet .f3d dans\n" DOSSIER "\n\nGenerez-le sur PC avec\noutils/atelier.py (voir port3ds/README.md).");
+		if (choix <= 0)
+		{
+			C3D_Fini();
+			gfxExit();
+			return 0;
+		}
+	}
+	et.facteur = lire_facteur();
+	if (!entrer(&et, chemin))
+	{
+		printf("Paquet illisible :\n%s\n", chemin);
+		attendre_start("");
+		C3D_Fini();
+		gfxExit();
+		return 0;
+	}
 
 	gauche = C3D_RenderTargetCreate(ECRAN_H, ECRAN_L, GPU_RB_RGBA8, GPU_RB_DEPTH24_STENCIL8);
 	C3D_RenderTargetSetOutput(gauche, GFX_TOP, GFX_LEFT, DISPLAY_TRANSFER_FLAGS);
@@ -556,6 +820,7 @@ int main(int argc, char** argv)
 
 	while (aptMainLoop())
 	{
+		Relief* r = &et.relief;
 		u32 appui, tenu;
 		circlePosition pad;
 		float curseur, k, oeil[2][4];
@@ -569,50 +834,38 @@ int main(int argc, char** argv)
 			break;
 		if (appui & KEY_SELECT)
 			stats = !stats;
-		hidCircleRead(&pad);
-		if (temoin)
+		if (appui & KEY_Y)
 		{
-			/* Walk on the walkmesh: the pad moves the character along the screen's right and forward axes,
-			 * projected on the ground; a step that leaves the walkmesh is refused, like a blocked edge. */
-			float dx = pad.dx / 156.0f, dy = pad.dy / 156.0f, nx, ny, nz, avant[2], droite[2], n;
-			droite[0] = relief.axes[0][0];
-			droite[1] = relief.axes[0][1];
-			avant[0] = relief.axes[2][0];
-			avant[1] = relief.axes[2][1];
-			n = sqrtf(droite[0] * droite[0] + droite[1] * droite[1]);
-			if (n > 0)
-				droite[0] /= n, droite[1] /= n;
-			n = sqrtf(avant[0] * avant[0] + avant[1] * avant[1]);
-			if (n > 0)
-				avant[0] /= n, avant[1] /= n;
+			/* back to the field list; the chosen field is loaded, or the current one stays */
+			char nouveau[256];
+			int choix = choisir_paquet(nouveau, sizeof(nouveau), chemin);
+			if (choix == 0)
+				break;
+			if (choix > 0 && strcmp(nouveau, chemin) != 0)
 			{
-				/* walk about 3 world units per frame (Cloud is 126 high), run twice that with B */
-				float vitesse = (tenu & KEY_B) ? 6.0f : 3.0f;
-				float mx = dx * droite[0] + dy * avant[0], my = dx * droite[1] + dy * avant[1];
-				float force = sqrtf(dx * dx + dy * dy);
-				if (force > 1.0f)
-					force = 1.0f;
-				nx = pied[0] + vitesse * (force > 0 ? mx / (sqrtf(mx * mx + my * my) + 1e-6f) * force : 0);
-				ny = pied[1] + vitesse * (force > 0 ? my / (sqrtf(mx * mx + my * my) + 1e-6f) * force : 0);
-				if (force > 0.15f)
-				{
-					/* turn towards the step; at angle 0 he looks towards -y */
-					angle = atan2f(mx, -my);
-					anim = (tenu & KEY_B) ? 2 : 1;
-					/* the PS1 field plays one animation frame per 30 Hz frame: half a frame per 60 Hz frame */
-					image += 0.5f * (force < 0.5f ? 0.5f : force);
-					if (sol(&relief, nx, ny, &nz))
-					{
-						pied[0] = nx;
-						pied[1] = ny;
-						pied[2] = nz;
-					}
-				}
-				else
-				{
-					anim = 0;
-					image = 0.0f;
-				}
+				if (entrer(&et, nouveau))
+					snprintf(chemin, sizeof(chemin), "%s", nouveau);
+				else if (!entrer(&et, chemin))
+					break;
+				decal_x = decal_y = 0.0f;
+			}
+			consoleClear();
+			continue;
+		}
+		hidCircleRead(&pad);
+		if (et.temoin)
+		{
+			float avant[3];
+			int change;
+			memcpy(avant, et.pied, sizeof(avant));
+			marcher(&et, &pad, tenu);
+			change = franchir(&et, avant, chemin, sizeof(chemin));
+			if (change < 0)
+				break;
+			if (change > 0)
+			{
+				decal_x = decal_y = 0.0f;
+				continue;
 			}
 		}
 		else
@@ -623,23 +876,30 @@ int main(int argc, char** argv)
 		decal_x += ((tenu & KEY_DRIGHT) ? 2 : 0) - ((tenu & KEY_DLEFT) ? 2 : 0);
 		decal_y += ((tenu & KEY_DDOWN) ? 2 : 0) - ((tenu & KEY_DUP) ? 2 : 0);
 		if (appui & KEY_ZR)
-			temoin = !temoin && relief.nb_triangles;
+			et.temoin = !et.temoin && r->nb_triangles;
+		/* the convergence follows Cloud: he stays on the screen plane, the background recedes behind him and what
+		 * is nearer than him comes out; L / R move that plane relative to him, and the choice is saved */
 		if (tenu & KEY_R)
-			convergence *= 1.02f;
+			et.facteur = et.facteur * 1.02f > 4.0f ? 4.0f : et.facteur * 1.02f;
 		if (tenu & KEY_L)
-			convergence /= 1.02f;
-		if (temoin && relief.a_perso)
+			et.facteur = et.facteur / 1.02f < 0.25f ? 0.25f : et.facteur / 1.02f;
+		if (hidKeysUp() & (KEY_L | KEY_R))
+			ecrire_facteur(et.facteur);
+		if (et.temoin && r->a_perso)
 		{
 			float px, py, ph, pz;
-			personnage_poser(&relief.perso, &cam, pied, angle, anim, image, &px, &py, &ph, &pz);
+			personnage_poser(&r->perso, &et.cam, et.pied, et.angle, et.anim, et.image, &px, &py, &ph, &pz);
+			et.convergence = et.convergence < 0 ? pz * et.facteur : et.convergence + (pz * et.facteur - et.convergence) * 0.1f;
 			/* the view follows him, centred on his waist, like the field camera scroll */
 			cx = px + decal_x;
 			cy = 0.5f * (py + ph) + decal_y;
 		}
-		else if (temoin)
+		else if (et.temoin)
 		{
 			float px, py;
-			placer_temoin(&relief, pied, &px, &py);
+			placer_temoin(r, et.pied, &px, &py);
+			et.convergence = et.convergence < 0 ? r->e.z_convergence * et.facteur
+			                                    : et.convergence + (r->e.z_convergence * et.facteur - et.convergence) * 0.1f;
 			/* the view follows the character, like the field camera scroll */
 			cx = px + decal_x;
 			cy = py - 40.0f + decal_y;
@@ -648,25 +908,27 @@ int main(int argc, char** argv)
 		{
 			cx = decal_x;
 			cy = decal_y;
+			et.convergence = et.convergence < 0 ? r->e.z_convergence * et.facteur
+			                                    : et.convergence + (r->e.z_convergence * et.facteur - et.convergence) * 0.1f;
 		}
-		cx = cx < xmin ? xmin : (cx > xmax ? xmax : cx);
-		cy = cy < ymin ? ymin : (cy > ymax ? ymax : cy);
+		cx = cx < et.xmin ? et.xmin : (cx > et.xmax ? et.xmax : cx);
+		cy = cy < et.ymin ? et.ymin : (cy > et.ymax ? et.ymax : cy);
 
 		curseur = osGet3DSliderState();
 		actif = curseur > 0.01f;
 		k = actif ? curseur * ECART_STEREO * 0.5f : 0.0f;
-		vecteur_oeil(-k, convergence, oeil[0]); /* left eye */
-		vecteur_oeil(k, convergence, oeil[1]);  /* right eye: far content shifts right */
+		vecteur_oeil(-k, et.convergence, oeil[0]); /* left eye */
+		vecteur_oeil(k, et.convergence, oeil[1]);  /* right eye: far content shifts right */
 
 		C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
 		C3D_RenderTargetClear(gauche, C3D_CLEAR_ALL, 0x000000FF, 0x00FFFFFF);
 		C3D_FrameDrawOn(gauche);
-		dessiner(&relief, cx, cy, oeil[0], temoin);
+		dessiner(r, cx, cy, oeil[0], et.temoin);
 		if (actif)
 		{
 			C3D_RenderTargetClear(droite, C3D_CLEAR_ALL, 0x000000FF, 0x00FFFFFF);
 			C3D_FrameDrawOn(droite);
-			dessiner(&relief, cx, cy, oeil[1], temoin);
+			dessiner(r, cx, cy, oeil[1], et.temoin);
 		}
 		C3D_FrameEnd(0);
 
@@ -676,34 +938,25 @@ int main(int argc, char** argv)
 		dernier = maintenant;
 		if (stats)
 		{
-			printf("\x1b[4;0H%s  %u sommets, %lu triangles      \n", relief.e.nom, relief.e.nb_sommets,
-			       (unsigned long)(relief.e.nb_indices / 3));
+			printf("\x1b[4;0H%s  %u sommets, %lu triangles      \n", r->e.nom, r->e.nb_sommets,
+			       (unsigned long)(r->e.nb_indices / 3));
 			printf("image : %5.1f ms (%4.1f i/s)        \n", ms, ms > 0 ? 1000.0f / ms : 0.0f);
 			printf("curseur 3D : %3.0f %%  ecart : %4.1f px    \n", curseur * 100.0f, 2 * k);
-			printf("convergence z : %6.0f (L / R)       \n", convergence);
+			printf("convergence z : %6.0f x%.2f (L / R) \n", et.convergence, et.facteur);
 			printf("vue : %5.0f, %5.0f (pad)          \n", cx, cy);
-			if (relief.a_perso)
-				printf("Cloud : %6.0f %6.0f %5.0f a%d i%2d  \n", pied[0], pied[1], pied[2], anim,
-				       (int)image % (relief.perso.nb_images[anim] ? relief.perso.nb_images[anim] : 1));
+			if (r->a_perso)
+				printf("Cloud : %6.0f %6.0f %5.0f a%d i%2d  \n", et.pied[0], et.pied[1], et.pied[2], et.anim,
+				       (int)et.image % (r->perso.nb_images[et.anim] ? r->perso.nb_images[et.anim] : 1));
 			else
-				printf("temoin : %6.0f %6.0f %5.0f (ZR)  \n", pied[0], pied[1], pied[2]);
-			printf("cartes d'occlusion : %u            \n", relief.nb_cartes);
+				printf("temoin : %6.0f %6.0f %5.0f (ZR)  \n", et.pied[0], et.pied[1], et.pied[2]);
+			printf("cartes d'occlusion : %u            \n", r->nb_cartes);
 			printf("GPU %4.1f %%  CPU %4.1f %%            \n", C3D_GetDrawingTime() * 6.0f,
 			       C3D_GetProcessingTime() * 6.0f);
-			printf("\nSELECT stats  ZR %s  B courir\nSTART quitter\n", relief.a_perso ? "Cloud" : "temoin");
+			printf("\nSELECT stats  ZR %s  B courir\nY ecrans  START quitter\n", r->a_perso ? "Cloud" : "temoin");
 		}
 	}
 
-	C3D_TexDelete(&relief.texture);
-	C3D_TexDelete(&relief.masque);
-	linearFree(relief.cartes);
-	linearFree(relief.idx_cartes);
-	linearFree(relief.temoin);
-	linearFree(relief.idx_temoin);
-	free(relief.triangles);
-	personnage_liberer(&relief.perso);
-	linearFree(relief.sommets);
-	linearFree(relief.indices);
+	relief_liberer(&et.relief);
 	shaderProgramFree(&s_programme);
 	DVLB_Free(s_dvlb);
 	shaderProgramFree(&s_programme_modele);

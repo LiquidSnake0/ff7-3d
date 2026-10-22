@@ -5,7 +5,9 @@
 
 Sur la 3DS : lancer ftpd, l'écran affiche « ftp://192.168.x.y:5000 ». Le script copie
 port3ds/ff7-3d.3dsx et les .f3d de sortie/ (tous, ou seulement les écrans nommés) dans
-sdmc:/3ds/ff7-3d/, saute ce qui est déjà là avec la même taille, puis relit les tailles.
+sdmc:/3ds/ff7-3d/ et relit les tailles. Le visualiseur est toujours renvoyé : deux versions peuvent avoir la
+même taille (c'est arrivé au premier essai, le 23.10.2026). Les paquets déjà là avec la même taille sont
+sautés, sauf avec --forcer.
 """
 import argparse
 import ftplib
@@ -28,6 +30,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("ip")
     p.add_argument("--port", type=int, default=5000)
+    p.add_argument("--forcer", action="store_true", help="renvoyer aussi les paquets déjà présents")
     p.add_argument("ecrans", nargs="*", help="noms d'écrans (MD1STIN…) ; tous les .f3d de sortie/ par défaut")
     a = p.parse_args()
 
@@ -53,7 +56,7 @@ def main():
     for f in fichiers:
         cible = f"{DISTANT}/{os.path.basename(f)}"
         taille = os.path.getsize(f)
-        if taille_distante(ftp, cible) == taille:
+        if not a.forcer and not f.endswith(".3dsx") and taille_distante(ftp, cible) == taille:
             print(f"déjà là : {cible}")
             continue
         with open(f, "rb") as source:

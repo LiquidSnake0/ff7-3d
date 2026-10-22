@@ -5,7 +5,8 @@ The game itself (ff7-decomp through a PsyZ 3DS backend) comes later; this viewer
 
 ## What it does
 
-- Loads the first `.f3d` package found in `sdmc:/3ds/ff7-3d/` (or the path given as the first argument).
+- Lists the `.f3d` packages of `sdmc:/3ds/ff7-3d/` on the bottom screen at start-up (pad and A to choose; Y
+  brings the list back), or loads the path given as the first argument.
   A package is generated on your PC from your own disc by `outils/atelier.py`; it is never distributed.
 - Draws the relief with citro3d. The vertex shader (`source/relief.v.pica`) is adapted from CTR-3D's model shader:
   `w = z / H`, perspective-correct depth, and the stereo parallax `p = k - kC/z` with `k` set by the 3D slider
@@ -22,8 +23,14 @@ The game itself (ff7-decomp through a PsyZ 3DS backend) comes later; this viewer
   drawn with `source/modele.v.pica` (same projection and stereo as the relief) through the depth test, and the
   view follows him like the field scroll. A package without a character falls back to the red test quad.
 
+- Walking through a field exit (package version 5) loads the target field if its package is on the SD card, and
+  stands Cloud where the game puts him; without it, the step is undone and the bottom screen names the field to
+  generate (`outils/atelier.py MD1_2`…).
+- The convergence follows Cloud: he sits on the screen plane, the background recedes behind him. L / R move that
+  plane relative to him; the choice is saved in `sdmc:/3ds/ff7-3d/reglages.txt`.
+
 Controls: the circle pad walks Cloud on the walkmesh (B held: he runs; the view follows him), the D-pad shifts the
-view, L / R move the convergence plane (the depth that sits on the screen), ZR hides the character (the circle pad
+view, L / R move the convergence plane relative to Cloud (saved), Y opens the field list, ZR hides the character (the circle pad
 then scrolls the view), SELECT toggles the stats on the bottom screen, START quits.
 
 ## Build

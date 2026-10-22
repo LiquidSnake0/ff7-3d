@@ -64,6 +64,9 @@ Target field: `MD1STIN` (index 116 in `g_FieldFileInfo`), then `MD1_1`.
     instead of the stand-in; built, not yet run on hardware. Face textures and lighting still to do
     (`cloud.md`).
 
+Beyond step 10, built: the field list on the bottom screen, walking from one field to the next through the
+game's exits (`MD1STIN` -> `MD1_1` -> `MD1_2`, package version 5), the convergence following Cloud (saved).
+
 Milestone 2 joins ff7-decomp: PsyZ 3DS backend, the real field engine driving Cloud, `AddBackgroundToRender`
 replaced.
 

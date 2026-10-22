@@ -66,9 +66,7 @@ def traiter(nom, pas=4, etats=None, personnage=True):
         Image.fromarray(gris).save(chemins.sortie(dossier, "profondeur.png"))
         if cuisson is not None and champ.walkmesh.triangles:
             # contrôle : le personnage debout au milieu du sol praticable, regard vers la caméra
-            tri = np.array(champ.walkmesh.triangles, dtype=np.float64)
-            centres = tri.mean(axis=1)
-            pos = centres[np.argmin(((centres - centres.mean(0)) ** 2).sum(1))]
+            pos = rendu.depart(champ, compose)
             vue = np.array(champ.camera.axes, dtype=np.float64)[2]
             img = Image.fromarray(compose.image).convert("RGB")
             rendu.dessiner(img, champ, compose.origine, cuisson, pos, rendu.direction_vers(-vue[0], -vue[1]))

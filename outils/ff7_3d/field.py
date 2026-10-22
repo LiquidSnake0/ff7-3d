@@ -72,6 +72,16 @@ class ChargeurModele:
 
 
 @dataclass
+class Porte:
+    """Une sortie vers un autre écran (FieldGateway, include/game.h) : franchir la ligne charge l'écran cible."""
+    ligne: tuple         # ((x1, y1, z1), (x2, y2, z2)) dans le monde
+    arrivee: tuple       # (x, y) du joueur dans l'écran cible
+    triangle: int        # triangle du walkmesh cible sous l'arrivée (pcPosI)
+    index_cible: int     # fieldMapId (index dans g_FieldFileInfo)
+    direction: int       # direction du joueur à l'arrivée (octet)
+
+
+@dataclass
 class Field:
     nom: str
     sections: dict
@@ -80,6 +90,7 @@ class Field:
     tuiles: list
     triggers: dict
     modeles: list = champ(default_factory=list)
+    portes: list = champ(default_factory=list)
 
 
 def _sections(dat):
@@ -177,6 +188,20 @@ def lire_tuiles(dat, debut):
     return tuiles
 
 
+PORTE_VIDE = 0x7FFF
+
+
+def lire_portes(dat, debut):
+    """Les 12 cases de FieldTriggers.gateways (à +0x38) ; une case sans cible (0x7FFF) ou nulle est ignorée."""
+    portes = []
+    for i in range(12):
+        x1, y1, z1, x2, y2, z2, ax, ay, tri, cible, direction = struct.unpack_from("<6h2hhHB3x", dat, debut + 0x38 + 24 * i)
+        if cible == PORTE_VIDE or not any((x1, y1, z1, x2, y2, z2)):
+            continue
+        portes.append(Porte(((x1, y1, z1), (x2, y2, z2)), (ax, ay), tri, cible, direction))
+    return portes
+
+
 def lire_triggers(dat, debut):
     nom = dat[debut:debut + 9].split(b"\0")[0].decode("ascii", "replace")
     (largeur2, hauteur2, largeur3, hauteur3) = struct.unpack_from("<4h", dat, debut + 0x18)
@@ -204,7 +229,8 @@ def lire(dat, nom=""):
     walkmesh = lire_walkmesh(dat, s["walkmesh"])
     tuiles = lire_tuiles(dat, s["tilemap"])
     triggers = lire_triggers(dat, s["triggers"])
-    return Field(nom or triggers["nom"], s, camera, walkmesh, tuiles, triggers, lire_modeles(dat, s["modeles"]))
+    return Field(nom or triggers["nom"], s, camera, walkmesh, tuiles, triggers, lire_modeles(dat, s["modeles"]),
+                 lire_portes(dat, s["triggers"]))
 
 
 def charger(disque, nom):

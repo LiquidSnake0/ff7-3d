@@ -4,7 +4,7 @@ Le vertex shader de la PICA200 ne lit pas de texture : le relief est donc cuit d
 ligne. Chaque sommet porte sa position écran PS1 (sx, sy), son z caméra (profondeur d'affichage) et ses
 coordonnées de texture ; la 3DS refait la projection et la stéréo (port3ds/).
 
-Format .f3d, petit-boutiste, version 4 :
+Format .f3d, petit-boutiste, version 5 :
     en-tête (64 octets)
         char  magie[4]      "F3D1"
         u16   version       1
@@ -46,6 +46,12 @@ Format .f3d, petit-boutiste, version 4 :
         animations nb_animations x (u16 nb_images, u16 bourrage, nb_images x nb_sommets x f32[3]) :
                sommets dans le repère du monde, pieds à l'origine, regard vers -y (direction 0)
 
+    portes (version 5) : les sorties vers d'autres écrans
+        char  magie[4]      "PORT"
+        u16   nb_portes
+        portes nb_portes x (s16 ligne[2][3], s16 arrivee[2], s16 triangle, char cible[9], u8 direction) :
+               franchir la ligne charge le paquet <cible>.f3d (en minuscules) s'il est sur la carte SD
+
 La 3DS dessine d'abord le relief (couleur seule, sans écrire la profondeur), puis les cartes d'occlusion
 (profondeur seule, test alpha sur le masque), puis les objets du jeu avec le test de profondeur : un
 personnage passe derrière une tuile exactement quand il le faisait sur PS1.
@@ -55,7 +61,7 @@ import struct
 import numpy as np
 
 MAGIE = b"F3D1"
-VERSION = 4
+VERSION = 5
 ID_FOND = 4095
 DISCONTINUITE = 1.15
 TAILLE_EN_TETE = 64
@@ -144,6 +150,20 @@ def ecrire_personnage(f, cuisson):
         f.write(np.ascontiguousarray(images, dtype="<f4").tobytes())
 
 
+def ecrire_portes(f, champ):
+    from . import ecrans
+    portes = []
+    for p in (champ.portes if champ is not None else []):
+        cible = ecrans.nom(p.index_cible)
+        if cible:
+            portes.append((p, cible))
+    f.write(struct.pack("<4sH", b"PORT", len(portes)))
+    for p, cible in portes:
+        (x1, y1, z1), (x2, y2, z2) = p.ligne
+        f.write(struct.pack("<6h2hh9sB", x1, y1, z1, x2, y2, z2, p.arrivee[0], p.arrivee[1], p.triangle,
+                            cible.encode("ascii")[:8], p.direction))
+
+
 def ecrire(chemin, nom, image_rgba, z, origine, zoom, z_convergence, pas=4, cartes=(), masque=None, champ=None,
            personnage=None):
     h, l = z.shape
@@ -179,6 +199,7 @@ def ecrire(chemin, nom, image_rgba, z, origine, zoom, z_convergence, pas=4, cart
             for acces in champ.walkmesh.acces:
                 f.write(struct.pack("<3h", *acces))
         ecrire_personnage(f, personnage)
+        ecrire_portes(f, champ)
         octets = f.tell()
     return {"sommets": len(sommets), "triangles": len(tris) // 3, "cartes": len(cartes), "octets": octets}
 
