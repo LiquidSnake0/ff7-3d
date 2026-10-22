@@ -53,6 +53,18 @@ typedef struct
 	float z_min, z_max;
 } __attribute__((packed)) EnTeteF3d;
 
+/* One exit of the field (package version 5): crossing the line loads <cible>.f3d (outils/ff7_3d/field.py, Porte). */
+typedef struct
+{
+	s16 ligne[2][3];
+	s16 arrivee[2];
+	s16 triangle;
+	char cible[9];
+	u8 direction;
+} __attribute__((packed)) PorteF3d;
+
+#define PORTES_MAX 16
+
 typedef struct
 {
 	EnTeteF3d e;
@@ -75,6 +87,9 @@ typedef struct
 	/* The player's character (package version 4). */
 	Personnage perso;
 	int a_perso;
+	/* Exits to other fields (package version 5). */
+	PorteF3d portes[PORTES_MAX];
+	u16 nb_portes;
 } Relief;
 
 /* One card of the package, as written by outils/ff7_3d/relief.py. */
@@ -247,6 +262,22 @@ static int charger_occlusion(FILE* f, Relief* r)
 			return 0;
 		r->a_perso = etat;
 	}
+	if (r->e.version >= 5)
+	{
+		char magie[4];
+		u16 n, i;
+		if (fread(magie, 4, 1, f) != 1 || memcmp(magie, "PORT", 4) != 0 || fread(&n, 2, 1, f) != 1)
+			return 0;
+		for (i = 0; i < n; i++)
+		{
+			PorteF3d p;
+			if (fread(&p, sizeof(p), 1, f) != 1)
+				return 0;
+			p.cible[8] = 0;
+			if (r->nb_portes < PORTES_MAX)
+				r->portes[r->nb_portes++] = p;
+		}
+	}
 
 	r->temoin = linearAlloc(4 * 5 * sizeof(float));
 	r->idx_temoin = linearAlloc(6 * sizeof(u16));
@@ -269,7 +300,7 @@ static int charger_relief(const char* chemin, Relief* r)
 	void* tampon;
 	if (!f)
 		return 0;
-	if (fread(&r->e, sizeof(r->e), 1, f) != 1 || memcmp(r->e.magie, "F3D1", 4) != 0 || r->e.version < 3 || r->e.version > 4)
+	if (fread(&r->e, sizeof(r->e), 1, f) != 1 || memcmp(r->e.magie, "F3D1", 4) != 0 || r->e.version < 3 || r->e.version > 5)
 	{
 		fclose(f);
 		return 0;
@@ -651,6 +682,68 @@ static void marcher(Etat* et, const circlePosition* pad, u32 tenu)
 	}
 }
 
+/* Does the step a -> b cross the segment p -> q (on the ground plane)? */
+static int croise(float ax, float ay, float bx, float by, float px, float py, float qx, float qy)
+{
+	float d1 = (qx - px) * (ay - py) - (qy - py) * (ax - px);
+	float d2 = (qx - px) * (by - py) - (qy - py) * (bx - px);
+	float d3 = (bx - ax) * (py - ay) - (by - ay) * (px - ax);
+	float d4 = (bx - ax) * (qy - ay) - (by - ay) * (qx - ax);
+	return ((d1 > 0) != (d2 > 0)) && ((d3 > 0) != (d4 > 0));
+}
+
+/*
+ * Field exits: when the last step crossed an exit line, load the target field if its package is on the SD card and
+ * stand Cloud where the game puts him (the exit's arrival point and direction). Returns 1 when the field changed.
+ * Without the package, the step is undone and the bottom screen says which field to generate.
+ */
+static int franchir(Etat* et, const float avant[3], char* chemin, size_t taille)
+{
+	Relief* r = &et->relief;
+	u16 i;
+	for (i = 0; i < r->nb_portes; i++)
+	{
+		const PorteF3d* p = &r->portes[i];
+		char cible[256], nom[16];
+		PorteF3d porte;
+		FILE* f;
+		int k;
+		float z;
+		if (!croise(avant[0], avant[1], et->pied[0], et->pied[1], p->ligne[0][0], p->ligne[0][1], p->ligne[1][0],
+		            p->ligne[1][1]))
+			continue;
+		for (k = 0; k < 15 && p->cible[k]; k++)
+			nom[k] = (p->cible[k] >= 'A' && p->cible[k] <= 'Z') ? p->cible[k] - 'A' + 'a' : p->cible[k];
+		nom[k] = 0;
+		snprintf(cible, sizeof(cible), "%s/%s.f3d", DOSSIER, nom);
+		f = fopen(cible, "rb");
+		if (!f)
+		{
+			memcpy(et->pied, avant, sizeof(et->pied));
+			printf("\x1b[27;0H%-8s absent : generez-le    \navec outils/atelier.py %-8s  ", p->cible, p->cible);
+			return 0;
+		}
+		fclose(f);
+		porte = *p; /* r is reloaded below */
+		if (!entrer(et, cible))
+			return -1;
+		snprintf(chemin, taille, "%s", cible);
+		et->pied[0] = porte.arrivee[0];
+		et->pied[1] = porte.arrivee[1];
+		if (sol(&et->relief, et->pied[0], et->pied[1], &z))
+			et->pied[2] = z;
+		else if (porte.triangle >= 0 && porte.triangle < et->relief.nb_triangles)
+		{
+			const s16(*t)[3] = et->relief.triangles[porte.triangle];
+			et->pied[2] = (t[0][2] + t[1][2] + t[2][2]) / 3.0f;
+		}
+		/* the entity's direction byte: 256 steps per turn, the same rotation as the workshop's (rendu.py) */
+		et->angle = porte.direction * (2.0f * 3.14159265f / 256.0f);
+		return 1;
+	}
+	return 0;
+}
+
 int main(int argc, char** argv)
 {
 	static Etat et;
@@ -733,7 +826,20 @@ int main(int argc, char** argv)
 		}
 		hidCircleRead(&pad);
 		if (et.temoin)
+		{
+			float avant[3];
+			int change;
+			memcpy(avant, et.pied, sizeof(avant));
 			marcher(&et, &pad, tenu);
+			change = franchir(&et, avant, chemin, sizeof(chemin));
+			if (change < 0)
+				break;
+			if (change > 0)
+			{
+				decal_x = decal_y = 0.0f;
+				continue;
+			}
+		}
 		else
 		{
 			decal_x += pad.dx / 40.0f;
