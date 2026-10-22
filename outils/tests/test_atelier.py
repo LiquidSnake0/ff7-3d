@@ -63,6 +63,18 @@ class TestRecalage(unittest.TestCase):
         self.assertLess(ecart, 0.01)
 
 
+class TestVariantes(unittest.TestCase):
+    @unittest.skipUnless(DISQUE_PRESENT, "disque du joueur absent")
+    def test_md1_2_a_des_groupes_et_ils_s_affichent_sur_demande(self):
+        with Disque(chemins.DISQUE) as d:
+            champ, mim = field.charger(d, "MD1_2")
+        g = fond.groupes(champ)
+        self.assertEqual(g, {1: [1, 2, 4, 8], 2: [1]})
+        base = fond.composer(champ, mim)
+        allume = fond.composer(champ, mim, {1: 1, 2: 1})
+        self.assertFalse(np.array_equal(base.image, allume.image))
+
+
 class TestRelief(unittest.TestCase):
     def test_tuilage_pica200(self):
         img = np.arange(16 * 16, dtype=np.uint16).reshape(16, 16)
@@ -82,14 +94,21 @@ class TestRelief(unittest.TestCase):
         self.assertEqual(len(sommets), 9 * 9)
         self.assertEqual(len(tris), 8 * 8 * 6)
         self.assertEqual(sommets[0, :2].tolist(), [-32.0, -32.0])
+        # sur la rupture (colonne 32 : 1000 à gauche, 2000 à droite), le sommet prend le plus proche
+        self.assertEqual(float(sommets[4, 2]), 1000.0)
+        self.assertEqual(float(sommets[5, 2]), 2000.0)
         self.assertAlmostEqual(float(sommets[0, 4]), 1.0)  # v = 1 en haut (texture rangée du bas vers le haut)
         image = np.zeros((64, 64, 4), dtype=np.uint8)
         with tempfile.TemporaryDirectory() as d:
             chemin = os.path.join(d, "t.f3d")
-            stats = relief.ecrire(chemin, "TEST", image, z, (-32, -32), 386, 1200.0, pas=8)
+            stats = relief.ecrire(chemin, "TEST", image, z, (-32, -32), 386, 1200.0, pas=8,
+                                  cartes=[(0, 0, 16, 2, 300)], masque=np.full((64, 64), 255, np.uint8))
             e = relief.lire_en_tete(chemin)
             self.assertEqual(os.path.getsize(chemin), stats["octets"])
+            attendu = 64 + 64 * 64 * 2 + 81 * 20 + 8 * 8 * 6 * 2 + 2 + 8 + 64 * 64
+            self.assertEqual(stats["octets"], attendu)
         self.assertEqual((e["magie"], e["nom"], e["tex_l"], e["nb_sommets"], e["zoom"]), (b"F3D1", "TEST", 64, 81, 386))
+        self.assertEqual(e["version"], 2)
         self.assertEqual(e["nb_indices"], 8 * 8 * 6)
 
 
@@ -149,6 +168,14 @@ class TestMd1stin(unittest.TestCase):
         self.assertTrue(250 < sol.min() < sol.max() < 2400)
         self.assertEqual(set(np.unique(rp.z_tuiles[np.isfinite(rp.z_tuiles)])), {608.0, 1176.0, 2176.0})
         self.assertTrue(np.isinf(rp.z_occlusion[r.couche == 1]).all())
+
+    def test_cartes_d_occlusion(self):
+        cartes = relief.cartes_occlusion(self.champ)
+        ids = sorted({c[4] for c in cartes})
+        # couche 2 seulement sur MD1STIN : les tuiles « toujours devant » (ID 1) et le train (152 à 544) ;
+        # celles d'ID 4087-4088 sont au fond et n'occultent rien
+        self.assertEqual(ids, [1, 152, 294, 544])
+        self.assertTrue(all(c[3] == 2 and c[2] == 16 for c in cartes))
 
 
 if __name__ == "__main__":
