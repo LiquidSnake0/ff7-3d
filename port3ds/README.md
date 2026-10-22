@@ -9,19 +9,20 @@ The game itself (ff7-decomp through a PsyZ 3DS backend) comes later; this viewer
   A package is generated on your PC from your own disc by `outils/atelier.py`; it is never distributed.
 - Draws the relief with citro3d. The vertex shader (`source/relief.v.pica`) is adapted from CTR-3D's model shader:
   `w = z / H`, perspective-correct depth, and the stereo parallax `p = k - kC/z` with `k` set by the 3D slider
-  (12 PS1 pixels of total disparity at infinity at full slider, CTR-3D's default).
+  (8 PS1 pixels of total disparity at infinity at full slider; CTR-3D's 12 was too strong on a still background).
 - Left eye always, right eye only when the slider is up, like CTR-3D.
 - Occlusion of the original game (milestone 1, step 9): after the relief (colour only), one flat card per
   occluding tile is drawn at `z = 4 x ID`, depth only, alpha-tested against the mask of the texels that occlude;
   a red test character then goes through the depth test. Walking it behind the train must hide it exactly where
   the PS1 would.
-- The test character stands on the field's real walkmesh (package version 3 carries the camera and the walkmesh):
-  the circle pad walks it along the screen's right and forward axes projected on the ground, a step off the
-  walkmesh is refused, its feet and head are projected by the field camera (so its size and depth are the
-  game's), and the view follows it like the field scroll. Its height (100 world units) is a guess until Cloud's
-  model arrives.
+- Cloud (package version 4, `docs/ff7-3d/cloud.md`): his model and his standing, walking and running animations,
+  baked by the workshop from the player's `CLOUD.BCX`, stand on the field's real walkmesh. The circle pad walks
+  him along the screen's right and forward axes projected on the ground (B held: he runs), he turns towards the
+  step, a step off the walkmesh is refused, his ~300 vertices are projected by the field camera on the CPU and
+  drawn with `source/modele.v.pica` (same projection and stereo as the relief) through the depth test, and the
+  view follows him like the field scroll. A package without a character falls back to the red test quad.
 
-Controls: the circle pad walks the test character on the walkmesh (the view follows it), the D-pad shifts the
+Controls: the circle pad walks Cloud on the walkmesh (B held: he runs; the view follows him), the D-pad shifts the
 view, L / R move the convergence plane (the depth that sits on the screen), ZR hides the character (the circle pad
 then scrolls the view), SELECT toggles the stats on the bottom screen, START quits.
 

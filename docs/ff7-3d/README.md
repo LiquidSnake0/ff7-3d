@@ -59,7 +59,10 @@ Target field: `MD1STIN` (index 116 in `g_FieldFileInfo`), then `MD1_1`.
 7. [x] Relief mesh (regular 4 px grid; cutting it at depth discontinuities is still to do) and the package format read by the 3DS.
 8. [~] 3DS viewer: relief in stereo with the 3D slider, frame counter. Built (`port3ds/`), not yet run on hardware.
 9. [~] Occlusion pass and a test object passing behind a layer-2 pillar. Built (package v2, 296 cards on `MD1STIN`), not yet run on hardware.
-10. [~] Cloud: model, walk animation, movement on the walkmesh; measurements. Movement on the walkmesh is built with a stand-in character (package v3 carries the camera and the walkmesh); Cloud's model and animation are next.
+10. [~] Cloud: model, walk animation, movement on the walkmesh; measurements. Cloud's model and his three
+    animations come from the player's `CLOUD.BCX`, baked into the package (version 4) and drawn on the 3DS
+    instead of the stand-in; built, not yet run on hardware. Face textures and lighting still to do
+    (`cloud.md`).
 
 Milestone 2 joins ff7-decomp: PsyZ 3DS backend, the real field engine driving Cloud, `AddBackgroundToRender`
 replaced.
@@ -71,7 +74,7 @@ replaced.
   error on the floor, 16 641 vertices, 32 768 triangles. A PC preview (`outils/apercu.py`) shows the expected
   parallax.
 - The 3DS viewer builds to `port3ds/ff7-3d.3dsx`; the first run on a New 3DS is the next step.
-- Not yet: Cloud's model and animation (step 10), background variants (`parameter`/`state` groups:
+- Cloud is in the package and in the viewer (`cloud.md`); not yet: his face textures and lighting, background variants (`parameter`/`state` groups:
   `MD1STIN` has none), layer 3/4 scrolling.
 
 ## Rules
