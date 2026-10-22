@@ -13,12 +13,17 @@ The game itself (ff7-decomp through a PsyZ 3DS backend) comes later; this viewer
 - Left eye always, right eye only when the slider is up, like CTR-3D.
 - Occlusion of the original game (milestone 1, step 9): after the relief (colour only), one flat card per
   occluding tile is drawn at `z = 4 x ID`, depth only, alpha-tested against the mask of the texels that occlude;
-  a red test object then goes through the depth test. Walking it behind the train must hide it exactly where
+  a red test character then goes through the depth test. Walking it behind the train must hide it exactly where
   the PS1 would.
+- The test character stands on the field's real walkmesh (package version 3 carries the camera and the walkmesh):
+  the circle pad walks it along the screen's right and forward axes projected on the ground, a step off the
+  walkmesh is refused, its feet and head are projected by the field camera (so its size and depth are the
+  game's), and the view follows it like the field scroll. Its height (100 world units) is a guess until Cloud's
+  model arrives.
 
-Controls: circle pad or D-pad scroll the 400x240 window over the background, L / R move the convergence plane
-(the depth that sits on the screen), Y / A move the test object sideways, X / B move it in depth (farther /
-nearer), ZR shows or hides it, SELECT toggles the stats on the bottom screen, START quits.
+Controls: the circle pad walks the test character on the walkmesh (the view follows it), the D-pad shifts the
+view, L / R move the convergence plane (the depth that sits on the screen), ZR hides the character (the circle pad
+then scrolls the view), SELECT toggles the stats on the bottom screen, START quits.
 
 ## Build
 
@@ -51,6 +56,7 @@ What to look at, on the real console (an emulator hides the PICA200's traps, CTR
 - with the slider down: the station looks exactly like the flat background, no seams between grid cells;
 - with the slider up: the platform floor recedes, the train on the right stands in front of the back wall,
   nothing tears at the edge of the train; L / R move the plane that stays sharp on the screen;
-- the test object: pushed far with X it disappears behind the train's tiles (z 608 to 2176 on `MD1STIN`) but
-  stays in front of the back wall; its outline follows the tile shapes, not 16x16 squares;
+- the test character: it walks along the platform and gets smaller as it goes; walking near the train, it is cut
+  by the train's tiles where the PS1 would hide Cloud (layer-2 tiles at z 608 to 2176 on `MD1STIN`), along the
+  tile shapes, not 16x16 squares; it never leaves the platform;
 - the frame time on the bottom screen (the mesh is 32 768 triangles per eye, plus the cards).
