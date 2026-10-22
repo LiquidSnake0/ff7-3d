@@ -10,9 +10,10 @@
  * it on the top screen with the 3D slider. The stereo model, the depth substrate and the render-target setup
  * follow CTR-3D (https://github.com/zando95/CTR-3D, GPL-3.0); see source/relief.v.pica.
  *
- * Controls: the circle pad walks a test character on the field's walkmesh (the view follows it), the D-pad
- * shifts the view, L / R move the convergence plane, ZR hides the character (the pad then scrolls the view),
- * SELECT toggles the frame stats, START quits.
+ * Controls: the circle pad walks Cloud on the field's walkmesh (B held: he runs; the view follows him), the
+ * D-pad shifts the view, L / R move the convergence plane, ZR hides him (the pad then scrolls the view),
+ * SELECT toggles the frame stats, START quits. A package without a character (written with
+ * --sans-personnage, or before version 4) falls back to the red test quad.
  */
 #include <3ds.h>
 #include <citro3d.h>
@@ -22,6 +23,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "modele_shbin.h"
+#include "personnage.h"
 #include "relief_shbin.h"
 
 #define DOSSIER "sdmc:/3ds/ff7-3d"
@@ -68,6 +71,9 @@ typedef struct
 	float trans[3];
 	u16 nb_triangles;
 	s16 (*triangles)[3][3]; /* world x, y, z (z up) */
+	/* The player's character (package version 4). */
+	Personnage perso;
+	int a_perso;
 } Relief;
 
 /* One card of the package, as written by outils/ff7_3d/relief.py. */
@@ -80,6 +86,8 @@ typedef struct
 
 static DVLB_s* s_dvlb;
 static shaderProgram_s s_programme;
+static DVLB_s* s_dvlb_modele;
+static shaderProgram_s s_programme_modele;
 static int s_uProjection, s_uH, s_uStereo;
 
 /* Total disparity at infinity, in PS1 pixels, at full slider (CTR-3D uses 12). */
@@ -174,6 +182,16 @@ static int charger_occlusion(FILE* f, Relief* r)
 			return 0;
 		if (r->nb_triangles && fread(r->triangles, sizeof(*r->triangles), r->nb_triangles, f) != r->nb_triangles)
 			return 0;
+		/* the neighbours by edge follow the triangles; the viewer refuses steps off the walkmesh without them */
+		if (fseek(f, (long)r->nb_triangles * 3 * sizeof(s16), SEEK_CUR) != 0)
+			return 0;
+	}
+	if (r->e.version >= 4)
+	{
+		int etat = personnage_charger(f, &r->perso);
+		if (etat < 0)
+			return 0;
+		r->a_perso = etat;
 	}
 
 	r->temoin = linearAlloc(4 * 5 * sizeof(float));
@@ -197,7 +215,7 @@ static int charger_relief(const char* chemin, Relief* r)
 	void* tampon;
 	if (!f)
 		return 0;
-	if (fread(&r->e, sizeof(r->e), 1, f) != 1 || memcmp(r->e.magie, "F3D1", 4) != 0 || r->e.version != 3)
+	if (fread(&r->e, sizeof(r->e), 1, f) != 1 || memcmp(r->e.magie, "F3D1", 4) != 0 || r->e.version < 3 || r->e.version > 4)
 	{
 		fclose(f);
 		return 0;
@@ -251,11 +269,50 @@ static void preparer_rendu(void)
 	s_uH = shaderInstanceGetUniformLocation(s_programme.vertexShader, "hParam");
 	s_uStereo = shaderInstanceGetUniformLocation(s_programme.vertexShader, "stereo");
 
+	/* The model program declares the same uniforms in the same order (projection, hParam, stereo), so they land
+	 * in the same registers and one upload per eye serves both programs. */
+	s_dvlb_modele = DVLB_ParseFile((u32*)modele_shbin, modele_shbin_size);
+	shaderProgramInit(&s_programme_modele);
+	shaderProgramSetVsh(&s_programme_modele, &s_dvlb_modele->DVLE[0]);
+
 	attr = C3D_GetAttrInfo();
 	AttrInfo_Init(attr);
 	AttrInfo_AddLoader(attr, 0, GPU_FLOAT, 3); /* sx, sy, z */
 	AttrInfo_AddLoader(attr, 1, GPU_FLOAT, 2); /* u, v */
 	C3D_CullFace(GPU_CULL_NONE);
+}
+
+static void programme_relief(void)
+{
+	C3D_AttrInfo* attr;
+	C3D_BindProgram(&s_programme);
+	attr = C3D_GetAttrInfo();
+	AttrInfo_Init(attr);
+	AttrInfo_AddLoader(attr, 0, GPU_FLOAT, 3); /* sx, sy, z */
+	AttrInfo_AddLoader(attr, 1, GPU_FLOAT, 2); /* u, v */
+}
+
+/* The character: positions projected on the CPU, PS1 polygon colours, depth-tested against the occlusion cards. */
+static void dessiner_personnage(Personnage* p)
+{
+	C3D_AttrInfo* attr;
+	C3D_BufInfo* buf;
+	C3D_TexEnv* env;
+	C3D_BindProgram(&s_programme_modele);
+	attr = C3D_GetAttrInfo();
+	AttrInfo_Init(attr);
+	AttrInfo_AddLoader(attr, 0, GPU_FLOAT, 3); /* sx, sy, z */
+	AttrInfo_AddLoader(attr, 1, GPU_FLOAT, 4); /* r, g, b, a */
+	buf = C3D_GetBufInfo();
+	BufInfo_Init(buf);
+	BufInfo_Add(buf, p->tampon, 7 * sizeof(float), 2, 0x10);
+	env = C3D_GetTexEnv(0);
+	C3D_TexEnvInit(env);
+	C3D_TexEnvSrc(env, C3D_Both, GPU_PRIMARY_COLOR, 0, 0);
+	C3D_TexEnvFunc(env, C3D_Both, GPU_REPLACE);
+	C3D_AlphaTest(false, GPU_ALWAYS, 0);
+	C3D_DepthTest(true, GPU_LEQUAL, GPU_WRITE_ALL);
+	C3D_DrawArrays(GPU_TRIANGLES, 0, p->nb_triangles * 3);
 }
 
 static void lier_sommets(const void* sommets)
@@ -360,6 +417,7 @@ static void dessiner(Relief* r, float cx, float cy, const float stereo[4], int a
 	C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uH, (float)r->e.zoom, 1.0f / (float)r->e.zoom, 0.0f, 0.0f);
 	C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uStereo, stereo[0], stereo[1], stereo[2], stereo[3]);
 
+	programme_relief();
 	lier_sommets(r->sommets);
 	combiner(&r->texture, 0);
 	C3D_AlphaTest(false, GPU_ALWAYS, 0);
@@ -375,7 +433,9 @@ static void dessiner(Relief* r, float cx, float cy, const float stereo[4], int a
 		C3D_DrawElements(GPU_TRIANGLES, r->nb_cartes * 6, C3D_UNSIGNED_SHORT, r->idx_cartes);
 	}
 
-	if (avec_temoin)
+	if (avec_temoin && r->a_perso)
+		dessiner_personnage(&r->perso);
+	else if (avec_temoin)
 	{
 		lier_sommets(r->temoin);
 		combiner(NULL, 0xFF4875E0); /* ABGR: a warm red, easy to see over Midgar's greens */
@@ -408,6 +468,10 @@ int main(int argc, char** argv)
 	int stats = 1;
 	u64 dernier = 0;
 	float ms = 0.0f;
+	/* Cloud: facing angle (radians, 0 = towards -y), animation (0 standing, 1 walking, 2 running) and frame */
+	float angle = 0.0f, image = 0.0f;
+	int anim = 0;
+	CameraTerrain cam;
 
 	gfxInitDefault();
 	gfxSet3D(true);
@@ -448,6 +512,11 @@ int main(int argc, char** argv)
 		return 0;
 	}
 	convergence = relief.e.z_convergence;
+	memcpy(cam.axes, relief.axes, sizeof(cam.axes));
+	memcpy(cam.trans, relief.trans, sizeof(cam.trans));
+	cam.zoom = relief.e.zoom;
+	/* first look: facing the camera, so his face shows */
+	angle = atan2f(-relief.axes[2][0], relief.axes[2][1]);
 	if (relief.nb_triangles)
 	{
 		/* start at the centre of the walkmesh when it is on the floor, else at the centre of its first
@@ -516,13 +585,34 @@ int main(int argc, char** argv)
 			n = sqrtf(avant[0] * avant[0] + avant[1] * avant[1]);
 			if (n > 0)
 				avant[0] /= n, avant[1] /= n;
-			nx = pied[0] + 12.0f * (dx * droite[0] + dy * avant[0]);
-			ny = pied[1] + 12.0f * (dx * droite[1] + dy * avant[1]);
-			if ((dx != 0 || dy != 0) && sol(&relief, nx, ny, &nz))
 			{
-				pied[0] = nx;
-				pied[1] = ny;
-				pied[2] = nz;
+				/* walk about 3 world units per frame (Cloud is 126 high), run twice that with B */
+				float vitesse = (tenu & KEY_B) ? 6.0f : 3.0f;
+				float mx = dx * droite[0] + dy * avant[0], my = dx * droite[1] + dy * avant[1];
+				float force = sqrtf(dx * dx + dy * dy);
+				if (force > 1.0f)
+					force = 1.0f;
+				nx = pied[0] + vitesse * (force > 0 ? mx / (sqrtf(mx * mx + my * my) + 1e-6f) * force : 0);
+				ny = pied[1] + vitesse * (force > 0 ? my / (sqrtf(mx * mx + my * my) + 1e-6f) * force : 0);
+				if (force > 0.15f)
+				{
+					/* turn towards the step; at angle 0 he looks towards -y */
+					angle = atan2f(mx, -my);
+					anim = (tenu & KEY_B) ? 2 : 1;
+					/* the PS1 field plays one animation frame per 30 Hz frame: half a frame per 60 Hz frame */
+					image += 0.5f * (force < 0.5f ? 0.5f : force);
+					if (sol(&relief, nx, ny, &nz))
+					{
+						pied[0] = nx;
+						pied[1] = ny;
+						pied[2] = nz;
+					}
+				}
+				else
+				{
+					anim = 0;
+					image = 0.0f;
+				}
 			}
 		}
 		else
@@ -538,7 +628,15 @@ int main(int argc, char** argv)
 			convergence *= 1.02f;
 		if (tenu & KEY_L)
 			convergence /= 1.02f;
-		if (temoin)
+		if (temoin && relief.a_perso)
+		{
+			float px, py, ph, pz;
+			personnage_poser(&relief.perso, &cam, pied, angle, anim, image, &px, &py, &ph, &pz);
+			/* the view follows him, centred on his waist, like the field camera scroll */
+			cx = px + decal_x;
+			cy = 0.5f * (py + ph) + decal_y;
+		}
+		else if (temoin)
 		{
 			float px, py;
 			placer_temoin(&relief, pied, &px, &py);
@@ -584,11 +682,15 @@ int main(int argc, char** argv)
 			printf("curseur 3D : %3.0f %%  ecart : %4.1f px    \n", curseur * 100.0f, 2 * k);
 			printf("convergence z : %6.0f (L / R)       \n", convergence);
 			printf("vue : %5.0f, %5.0f (pad)          \n", cx, cy);
-			printf("temoin : %6.0f %6.0f %5.0f (ZR)  \n", pied[0], pied[1], pied[2]);
+			if (relief.a_perso)
+				printf("Cloud : %6.0f %6.0f %5.0f a%d i%2d  \n", pied[0], pied[1], pied[2], anim,
+				       (int)image % (relief.perso.nb_images[anim] ? relief.perso.nb_images[anim] : 1));
+			else
+				printf("temoin : %6.0f %6.0f %5.0f (ZR)  \n", pied[0], pied[1], pied[2]);
 			printf("cartes d'occlusion : %u            \n", relief.nb_cartes);
 			printf("GPU %4.1f %%  CPU %4.1f %%            \n", C3D_GetDrawingTime() * 6.0f,
 			       C3D_GetProcessingTime() * 6.0f);
-			printf("\nSELECT stats  ZR temoin  START quitter\n");
+			printf("\nSELECT stats  ZR %s  B courir\nSTART quitter\n", relief.a_perso ? "Cloud" : "temoin");
 		}
 	}
 
@@ -599,10 +701,13 @@ int main(int argc, char** argv)
 	linearFree(relief.temoin);
 	linearFree(relief.idx_temoin);
 	free(relief.triangles);
+	personnage_liberer(&relief.perso);
 	linearFree(relief.sommets);
 	linearFree(relief.indices);
 	shaderProgramFree(&s_programme);
 	DVLB_Free(s_dvlb);
+	shaderProgramFree(&s_programme_modele);
+	DVLB_Free(s_dvlb_modele);
 	C3D_RenderTargetDelete(gauche);
 	C3D_RenderTargetDelete(droite);
 	C3D_Fini();

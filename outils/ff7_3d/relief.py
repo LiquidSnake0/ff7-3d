@@ -4,7 +4,7 @@ Le vertex shader de la PICA200 ne lit pas de texture : le relief est donc cuit d
 ligne. Chaque sommet porte sa position écran PS1 (sx, sy), son z caméra (profondeur d'affichage) et ses
 coordonnées de texture ; la 3DS refait la projection et la stéréo (port3ds/).
 
-Format .f3d, petit-boutiste, version 3 :
+Format .f3d, petit-boutiste, version 4 :
     en-tête (64 octets)
         char  magie[4]      "F3D1"
         u16   version       1
@@ -35,6 +35,17 @@ Format .f3d, petit-boutiste, version 3 :
         triangles nb_triangles x 3 x (s16 x, s16 y, s16 z) : le sol praticable, coordonnées du monde (z vers le haut)
         acces nb_triangles x 3 x s16 : voisin par arête, -1 = bloqué
 
+    personnage (version 4), pour le joueur (Cloud au début du jeu)
+        char  magie[4]      "PERS"
+        u16   nb_sommets    0 : pas de personnage
+        u16   nb_triangles
+        u8    nb_animations 0 debout, 1 marche, 2 course pour les personnages de l'équipe
+        u8, u16 bourrage
+        f32   hauteur       en unités du monde
+        triangles nb_triangles x (u16 i[3], u8 rgb[3][3], u8 bourrage)
+        animations nb_animations x (u16 nb_images, u16 bourrage, nb_images x nb_sommets x f32[3]) :
+               sommets dans le repère du monde, pieds à l'origine, regard vers -y (direction 0)
+
 La 3DS dessine d'abord le relief (couleur seule, sans écrire la profondeur), puis les cartes d'occlusion
 (profondeur seule, test alpha sur le masque), puis les objets du jeu avec le test de profondeur : un
 personnage passe derrière une tuile exactement quand il le faisait sur PS1.
@@ -44,7 +55,7 @@ import struct
 import numpy as np
 
 MAGIE = b"F3D1"
-VERSION = 3
+VERSION = 4
 ID_FOND = 4095
 DISCONTINUITE = 1.15
 TAILLE_EN_TETE = 64
@@ -120,7 +131,21 @@ def masque_occlusion(fond_compose):
     return np.where(m, 255, 0).astype(np.uint8)
 
 
-def ecrire(chemin, nom, image_rgba, z, origine, zoom, z_convergence, pas=4, cartes=(), masque=None, champ=None):
+def ecrire_personnage(f, cuisson):
+    if cuisson is None:
+        f.write(struct.pack("<4sHHBBHf", b"PERS", 0, 0, 0, 0, 0, 0.0))
+        return
+    f.write(struct.pack("<4sHHBBHf", b"PERS", cuisson.nb_sommets, len(cuisson.triangles), len(cuisson.animations),
+                        0, 0, cuisson.hauteur))
+    for i0, i1, i2, c0, c1, c2 in cuisson.triangles:
+        f.write(struct.pack("<3H9Bx", i0, i1, i2, *c0, *c1, *c2))
+    for images in cuisson.animations:
+        f.write(struct.pack("<HH", len(images), 0))
+        f.write(np.ascontiguousarray(images, dtype="<f4").tobytes())
+
+
+def ecrire(chemin, nom, image_rgba, z, origine, zoom, z_convergence, pas=4, cartes=(), masque=None, champ=None,
+           personnage=None):
     h, l = z.shape
     for n in (h, l):
         if n & (n - 1) or n > 1024 or n < 8:
@@ -153,6 +178,7 @@ def ecrire(chemin, nom, image_rgba, z, origine, zoom, z_convergence, pas=4, cart
                     f.write(struct.pack("<3h", x, y, zz))
             for acces in champ.walkmesh.acces:
                 f.write(struct.pack("<3h", *acces))
+        ecrire_personnage(f, personnage)
         octets = f.tell()
     return {"sommets": len(sommets), "triangles": len(tris) // 3, "cartes": len(cartes), "octets": octets}
 
