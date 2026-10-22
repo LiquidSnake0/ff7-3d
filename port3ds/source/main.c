@@ -455,23 +455,158 @@ static void vecteur_oeil(float k, float convergence, float v[4])
 	v[3] = 2.0f * a;
 }
 
-int main(int argc, char** argv)
+static void relief_liberer(Relief* r)
+{
+	if (r->texture.data)
+		C3D_TexDelete(&r->texture);
+	if (r->masque.data)
+		C3D_TexDelete(&r->masque);
+	if (r->cartes)
+		linearFree(r->cartes);
+	if (r->idx_cartes)
+		linearFree(r->idx_cartes);
+	if (r->temoin)
+		linearFree(r->temoin);
+	if (r->idx_temoin)
+		linearFree(r->idx_temoin);
+	free(r->triangles);
+	personnage_liberer(&r->perso);
+	if (r->sommets)
+		linearFree(r->sommets);
+	if (r->indices)
+		linearFree(r->indices);
+	memset(r, 0, sizeof(*r));
+}
+
+/* Everything the viewer keeps about the field it shows and the character in it. */
+typedef struct
 {
 	Relief relief;
+	CameraTerrain cam;
+	float pied[3];
+	float angle, image; /* Cloud: facing (radians, 0 = towards -y) and animation frame */
+	int anim;           /* 0 standing, 1 walking, 2 running */
+	int temoin;         /* the character is shown (ZR) */
+	float convergence;
+	float xmin, xmax, ymin, ymax; /* where the view centre may go, so the window stays on the background */
+} Etat;
+
+static void attendre_start(const char* message)
+{
+	printf("%s\n\nSTART pour quitter.\n", message);
+	while (aptMainLoop())
+	{
+		hidScanInput();
+		if (hidKeysDown() & KEY_START)
+			break;
+		gspWaitForVBlank();
+	}
+}
+
+/* Loads a package and stands the character at the centre of the walkmesh, facing the camera. */
+static int entrer(Etat* et, const char* chemin)
+{
+	Relief* r = &et->relief;
+	relief_liberer(r);
+	if (!charger_relief(chemin, r))
+		return 0;
+	et->convergence = r->e.z_convergence;
+	memcpy(et->cam.axes, r->axes, sizeof(et->cam.axes));
+	memcpy(et->cam.trans, r->trans, sizeof(et->cam.trans));
+	et->cam.zoom = r->e.zoom;
+	/* first look: facing the camera, so his face shows */
+	et->angle = atan2f(-r->axes[2][0], r->axes[2][1]);
+	et->anim = 0;
+	et->image = 0.0f;
+	et->temoin = r->nb_triangles != 0;
+	if (r->nb_triangles)
+	{
+		/* start at the centre of the walkmesh when it is on the floor, else at the centre of its first
+		 * triangle */
+		int k, t, v;
+		float z;
+		for (k = 0; k < 3; k++)
+		{
+			float somme = 0;
+			for (t = 0; t < r->nb_triangles; t++)
+				for (v = 0; v < 3; v++)
+					somme += r->triangles[t][v][k];
+			et->pied[k] = somme / (3.0f * r->nb_triangles);
+		}
+		if (sol(r, et->pied[0], et->pied[1], &z))
+			et->pied[2] = z;
+		else
+			for (k = 0; k < 3; k++)
+				et->pied[k] = (r->triangles[0][0][k] + r->triangles[0][1][k] + r->triangles[0][2][k]) / 3.0f;
+	}
+	et->xmin = r->e.ox + ECRAN_L / 2;
+	et->xmax = r->e.ox + r->e.tex_l - ECRAN_L / 2;
+	et->ymin = r->e.oy + ECRAN_H / 2;
+	et->ymax = r->e.oy + r->e.tex_h - ECRAN_H / 2;
+	if (et->xmin > et->xmax)
+		et->xmin = et->xmax = r->e.ox + r->e.tex_l / 2;
+	if (et->ymin > et->ymax)
+		et->ymin = et->ymax = r->e.oy + r->e.tex_h / 2;
+	consoleClear();
+	return 1;
+}
+
+/* Walk on the walkmesh: the pad moves the character along the screen's right and forward axes, projected on the
+ * ground; a step that leaves the walkmesh is refused, like a blocked edge. */
+static void marcher(Etat* et, const circlePosition* pad, u32 tenu)
+{
+	Relief* r = &et->relief;
+	float dx = pad->dx / 156.0f, dy = pad->dy / 156.0f, nx, ny, nz, avant[2], droite[2], n;
+	/* walk about 3 world units per frame (Cloud is 126 high), run twice that with B */
+	float vitesse = (tenu & KEY_B) ? 6.0f : 3.0f;
+	float mx, my, force;
+	droite[0] = r->axes[0][0];
+	droite[1] = r->axes[0][1];
+	avant[0] = r->axes[2][0];
+	avant[1] = r->axes[2][1];
+	n = sqrtf(droite[0] * droite[0] + droite[1] * droite[1]);
+	if (n > 0)
+		droite[0] /= n, droite[1] /= n;
+	n = sqrtf(avant[0] * avant[0] + avant[1] * avant[1]);
+	if (n > 0)
+		avant[0] /= n, avant[1] /= n;
+	mx = dx * droite[0] + dy * avant[0];
+	my = dx * droite[1] + dy * avant[1];
+	force = sqrtf(dx * dx + dy * dy);
+	if (force > 1.0f)
+		force = 1.0f;
+	if (force <= 0.15f)
+	{
+		et->anim = 0;
+		et->image = 0.0f;
+		return;
+	}
+	n = sqrtf(mx * mx + my * my) + 1e-6f;
+	nx = et->pied[0] + vitesse * mx / n * force;
+	ny = et->pied[1] + vitesse * my / n * force;
+	/* turn towards the step; at angle 0 he looks towards -y */
+	et->angle = atan2f(mx, -my);
+	et->anim = (tenu & KEY_B) ? 2 : 1;
+	/* the PS1 field plays one animation frame per 30 Hz frame: half a frame per 60 Hz frame */
+	et->image += 0.5f * (force < 0.5f ? 0.5f : force);
+	if (sol(r, nx, ny, &nz))
+	{
+		et->pied[0] = nx;
+		et->pied[1] = ny;
+		et->pied[2] = nz;
+	}
+}
+
+int main(int argc, char** argv)
+{
+	static Etat et;
 	char chemin[256];
 	C3D_RenderTarget *gauche, *droite;
-	float cx = 0.0f, cy = 0.0f, convergence;
-	float pied[3] = {0, 0, 0};
+	float cx = 0.0f, cy = 0.0f;
 	float decal_x = 0.0f, decal_y = 0.0f;
-	int temoin = 1;
-	float xmin, xmax, ymin, ymax;
 	int stats = 1;
 	u64 dernier = 0;
 	float ms = 0.0f;
-	/* Cloud: facing angle (radians, 0 = towards -y), animation (0 standing, 1 walking, 2 running) and frame */
-	float angle = 0.0f, image = 0.0f;
-	int anim = 0;
-	CameraTerrain cam;
 
 	gfxInitDefault();
 	gfxSet3D(true);
@@ -483,70 +618,19 @@ int main(int argc, char** argv)
 		snprintf(chemin, sizeof(chemin), "%s", argv[1]);
 	else if (!chercher_paquet(chemin, sizeof(chemin)))
 	{
-		printf("Aucun paquet .f3d dans\n%s\n\nGenerez-le sur PC avec\noutils/atelier.py (voir port3ds/README.md).\n\nSTART pour quitter.\n",
-		       DOSSIER);
-		while (aptMainLoop())
-		{
-			hidScanInput();
-			if (hidKeysDown() & KEY_START)
-				break;
-			gspWaitForVBlank();
-		}
+		attendre_start("Aucun paquet .f3d dans\n" DOSSIER "\n\nGenerez-le sur PC avec\noutils/atelier.py (voir port3ds/README.md).");
 		C3D_Fini();
 		gfxExit();
 		return 0;
 	}
-	memset(&relief, 0, sizeof(relief));
-	if (!charger_relief(chemin, &relief))
+	if (!entrer(&et, chemin))
 	{
-		printf("Paquet illisible :\n%s\n\nSTART pour quitter.\n", chemin);
-		while (aptMainLoop())
-		{
-			hidScanInput();
-			if (hidKeysDown() & KEY_START)
-				break;
-			gspWaitForVBlank();
-		}
+		printf("Paquet illisible :\n%s\n", chemin);
+		attendre_start("");
 		C3D_Fini();
 		gfxExit();
 		return 0;
 	}
-	convergence = relief.e.z_convergence;
-	memcpy(cam.axes, relief.axes, sizeof(cam.axes));
-	memcpy(cam.trans, relief.trans, sizeof(cam.trans));
-	cam.zoom = relief.e.zoom;
-	/* first look: facing the camera, so his face shows */
-	angle = atan2f(-relief.axes[2][0], relief.axes[2][1]);
-	if (relief.nb_triangles)
-	{
-		/* start at the centre of the walkmesh when it is on the floor, else at the centre of its first
-		 * triangle */
-		int k, t, v;
-		float z;
-		for (k = 0; k < 3; k++)
-		{
-			float somme = 0;
-			for (t = 0; t < relief.nb_triangles; t++)
-				for (v = 0; v < 3; v++)
-					somme += relief.triangles[t][v][k];
-			pied[k] = somme / (3.0f * relief.nb_triangles);
-		}
-		if (sol(&relief, pied[0], pied[1], &z))
-			pied[2] = z;
-		else
-			for (k = 0; k < 3; k++)
-				pied[k] = (relief.triangles[0][0][k] + relief.triangles[0][1][k] + relief.triangles[0][2][k]) / 3.0f;
-	}
-	else
-		temoin = 0;
-	xmin = relief.e.ox + ECRAN_L / 2;
-	xmax = relief.e.ox + relief.e.tex_l - ECRAN_L / 2;
-	ymin = relief.e.oy + ECRAN_H / 2;
-	ymax = relief.e.oy + relief.e.tex_h - ECRAN_H / 2;
-	if (xmin > xmax)
-		xmin = xmax = relief.e.ox + relief.e.tex_l / 2;
-	if (ymin > ymax)
-		ymin = ymax = relief.e.oy + relief.e.tex_h / 2;
 
 	gauche = C3D_RenderTargetCreate(ECRAN_H, ECRAN_L, GPU_RB_RGBA8, GPU_RB_DEPTH24_STENCIL8);
 	C3D_RenderTargetSetOutput(gauche, GFX_TOP, GFX_LEFT, DISPLAY_TRANSFER_FLAGS);
@@ -556,6 +640,7 @@ int main(int argc, char** argv)
 
 	while (aptMainLoop())
 	{
+		Relief* r = &et.relief;
 		u32 appui, tenu;
 		circlePosition pad;
 		float curseur, k, oeil[2][4];
@@ -570,51 +655,8 @@ int main(int argc, char** argv)
 		if (appui & KEY_SELECT)
 			stats = !stats;
 		hidCircleRead(&pad);
-		if (temoin)
-		{
-			/* Walk on the walkmesh: the pad moves the character along the screen's right and forward axes,
-			 * projected on the ground; a step that leaves the walkmesh is refused, like a blocked edge. */
-			float dx = pad.dx / 156.0f, dy = pad.dy / 156.0f, nx, ny, nz, avant[2], droite[2], n;
-			droite[0] = relief.axes[0][0];
-			droite[1] = relief.axes[0][1];
-			avant[0] = relief.axes[2][0];
-			avant[1] = relief.axes[2][1];
-			n = sqrtf(droite[0] * droite[0] + droite[1] * droite[1]);
-			if (n > 0)
-				droite[0] /= n, droite[1] /= n;
-			n = sqrtf(avant[0] * avant[0] + avant[1] * avant[1]);
-			if (n > 0)
-				avant[0] /= n, avant[1] /= n;
-			{
-				/* walk about 3 world units per frame (Cloud is 126 high), run twice that with B */
-				float vitesse = (tenu & KEY_B) ? 6.0f : 3.0f;
-				float mx = dx * droite[0] + dy * avant[0], my = dx * droite[1] + dy * avant[1];
-				float force = sqrtf(dx * dx + dy * dy);
-				if (force > 1.0f)
-					force = 1.0f;
-				nx = pied[0] + vitesse * (force > 0 ? mx / (sqrtf(mx * mx + my * my) + 1e-6f) * force : 0);
-				ny = pied[1] + vitesse * (force > 0 ? my / (sqrtf(mx * mx + my * my) + 1e-6f) * force : 0);
-				if (force > 0.15f)
-				{
-					/* turn towards the step; at angle 0 he looks towards -y */
-					angle = atan2f(mx, -my);
-					anim = (tenu & KEY_B) ? 2 : 1;
-					/* the PS1 field plays one animation frame per 30 Hz frame: half a frame per 60 Hz frame */
-					image += 0.5f * (force < 0.5f ? 0.5f : force);
-					if (sol(&relief, nx, ny, &nz))
-					{
-						pied[0] = nx;
-						pied[1] = ny;
-						pied[2] = nz;
-					}
-				}
-				else
-				{
-					anim = 0;
-					image = 0.0f;
-				}
-			}
-		}
+		if (et.temoin)
+			marcher(&et, &pad, tenu);
 		else
 		{
 			decal_x += pad.dx / 40.0f;
@@ -623,23 +665,23 @@ int main(int argc, char** argv)
 		decal_x += ((tenu & KEY_DRIGHT) ? 2 : 0) - ((tenu & KEY_DLEFT) ? 2 : 0);
 		decal_y += ((tenu & KEY_DDOWN) ? 2 : 0) - ((tenu & KEY_DUP) ? 2 : 0);
 		if (appui & KEY_ZR)
-			temoin = !temoin && relief.nb_triangles;
+			et.temoin = !et.temoin && r->nb_triangles;
 		if (tenu & KEY_R)
-			convergence *= 1.02f;
+			et.convergence *= 1.02f;
 		if (tenu & KEY_L)
-			convergence /= 1.02f;
-		if (temoin && relief.a_perso)
+			et.convergence /= 1.02f;
+		if (et.temoin && r->a_perso)
 		{
 			float px, py, ph, pz;
-			personnage_poser(&relief.perso, &cam, pied, angle, anim, image, &px, &py, &ph, &pz);
+			personnage_poser(&r->perso, &et.cam, et.pied, et.angle, et.anim, et.image, &px, &py, &ph, &pz);
 			/* the view follows him, centred on his waist, like the field camera scroll */
 			cx = px + decal_x;
 			cy = 0.5f * (py + ph) + decal_y;
 		}
-		else if (temoin)
+		else if (et.temoin)
 		{
 			float px, py;
-			placer_temoin(&relief, pied, &px, &py);
+			placer_temoin(r, et.pied, &px, &py);
 			/* the view follows the character, like the field camera scroll */
 			cx = px + decal_x;
 			cy = py - 40.0f + decal_y;
@@ -649,24 +691,24 @@ int main(int argc, char** argv)
 			cx = decal_x;
 			cy = decal_y;
 		}
-		cx = cx < xmin ? xmin : (cx > xmax ? xmax : cx);
-		cy = cy < ymin ? ymin : (cy > ymax ? ymax : cy);
+		cx = cx < et.xmin ? et.xmin : (cx > et.xmax ? et.xmax : cx);
+		cy = cy < et.ymin ? et.ymin : (cy > et.ymax ? et.ymax : cy);
 
 		curseur = osGet3DSliderState();
 		actif = curseur > 0.01f;
 		k = actif ? curseur * ECART_STEREO * 0.5f : 0.0f;
-		vecteur_oeil(-k, convergence, oeil[0]); /* left eye */
-		vecteur_oeil(k, convergence, oeil[1]);  /* right eye: far content shifts right */
+		vecteur_oeil(-k, et.convergence, oeil[0]); /* left eye */
+		vecteur_oeil(k, et.convergence, oeil[1]);  /* right eye: far content shifts right */
 
 		C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
 		C3D_RenderTargetClear(gauche, C3D_CLEAR_ALL, 0x000000FF, 0x00FFFFFF);
 		C3D_FrameDrawOn(gauche);
-		dessiner(&relief, cx, cy, oeil[0], temoin);
+		dessiner(r, cx, cy, oeil[0], et.temoin);
 		if (actif)
 		{
 			C3D_RenderTargetClear(droite, C3D_CLEAR_ALL, 0x000000FF, 0x00FFFFFF);
 			C3D_FrameDrawOn(droite);
-			dessiner(&relief, cx, cy, oeil[1], temoin);
+			dessiner(r, cx, cy, oeil[1], et.temoin);
 		}
 		C3D_FrameEnd(0);
 
@@ -676,34 +718,25 @@ int main(int argc, char** argv)
 		dernier = maintenant;
 		if (stats)
 		{
-			printf("\x1b[4;0H%s  %u sommets, %lu triangles      \n", relief.e.nom, relief.e.nb_sommets,
-			       (unsigned long)(relief.e.nb_indices / 3));
+			printf("\x1b[4;0H%s  %u sommets, %lu triangles      \n", r->e.nom, r->e.nb_sommets,
+			       (unsigned long)(r->e.nb_indices / 3));
 			printf("image : %5.1f ms (%4.1f i/s)        \n", ms, ms > 0 ? 1000.0f / ms : 0.0f);
 			printf("curseur 3D : %3.0f %%  ecart : %4.1f px    \n", curseur * 100.0f, 2 * k);
-			printf("convergence z : %6.0f (L / R)       \n", convergence);
+			printf("convergence z : %6.0f (L / R)       \n", et.convergence);
 			printf("vue : %5.0f, %5.0f (pad)          \n", cx, cy);
-			if (relief.a_perso)
-				printf("Cloud : %6.0f %6.0f %5.0f a%d i%2d  \n", pied[0], pied[1], pied[2], anim,
-				       (int)image % (relief.perso.nb_images[anim] ? relief.perso.nb_images[anim] : 1));
+			if (r->a_perso)
+				printf("Cloud : %6.0f %6.0f %5.0f a%d i%2d  \n", et.pied[0], et.pied[1], et.pied[2], et.anim,
+				       (int)et.image % (r->perso.nb_images[et.anim] ? r->perso.nb_images[et.anim] : 1));
 			else
-				printf("temoin : %6.0f %6.0f %5.0f (ZR)  \n", pied[0], pied[1], pied[2]);
-			printf("cartes d'occlusion : %u            \n", relief.nb_cartes);
+				printf("temoin : %6.0f %6.0f %5.0f (ZR)  \n", et.pied[0], et.pied[1], et.pied[2]);
+			printf("cartes d'occlusion : %u            \n", r->nb_cartes);
 			printf("GPU %4.1f %%  CPU %4.1f %%            \n", C3D_GetDrawingTime() * 6.0f,
 			       C3D_GetProcessingTime() * 6.0f);
-			printf("\nSELECT stats  ZR %s  B courir\nSTART quitter\n", relief.a_perso ? "Cloud" : "temoin");
+			printf("\nSELECT stats  ZR %s  B courir\nSTART quitter\n", r->a_perso ? "Cloud" : "temoin");
 		}
 	}
 
-	C3D_TexDelete(&relief.texture);
-	C3D_TexDelete(&relief.masque);
-	linearFree(relief.cartes);
-	linearFree(relief.idx_cartes);
-	linearFree(relief.temoin);
-	linearFree(relief.idx_temoin);
-	free(relief.triangles);
-	personnage_liberer(&relief.perso);
-	linearFree(relief.sommets);
-	linearFree(relief.indices);
+	relief_liberer(&et.relief);
 	shaderProgramFree(&s_programme);
 	DVLB_Free(s_dvlb);
 	shaderProgramFree(&s_programme_modele);
