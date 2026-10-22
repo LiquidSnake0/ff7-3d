@@ -12,7 +12,8 @@
  *
  * Controls: the circle pad walks Cloud on the field's walkmesh (B held: he runs; the view follows him), the
  * D-pad shifts the view, L / R move the convergence plane, ZR hides him (the pad then scrolls the view),
- * SELECT toggles the frame stats, START quits. A package without a character (written with
+ * Y opens the field list, SELECT toggles the frame stats, START quits. At start-up the bottom screen lists the
+ * packages on the SD card. A package without a character (written with
  * --sans-personnage, or before version 4) falls back to the red test quad.
  */
 #include <3ds.h>
@@ -93,23 +94,76 @@ static int s_uProjection, s_uH, s_uStereo;
 /* Total disparity at infinity, in PS1 pixels, at full slider (CTR-3D uses 12). */
 static const float ECART_STEREO = 8.0f; /* 12 (CTR-3D) was too strong on FF7's backgrounds at full slider */
 
-static int chercher_paquet(char* chemin, size_t taille)
+#define PAQUETS_MAX 64
+
+/* The .f3d packages on the SD card, sorted by name. */
+static int lister_paquets(char noms[][32])
 {
 	DIR* d = opendir(DOSSIER);
 	struct dirent* e;
+	int n = 0, i, j;
 	if (!d)
 		return 0;
-	while ((e = readdir(d)) != NULL)
+	while ((e = readdir(d)) != NULL && n < PAQUETS_MAX)
 	{
-		size_t n = strlen(e->d_name);
-		if (n > 4 && strcmp(e->d_name + n - 4, ".f3d") == 0)
-		{
-			snprintf(chemin, taille, "%s/%.200s", DOSSIER, e->d_name);
-			closedir(d);
-			return 1;
-		}
+		size_t l = strlen(e->d_name);
+		if (l > 4 && l < 32 && strcmp(e->d_name + l - 4, ".f3d") == 0)
+			snprintf(noms[n++], 32, "%s", e->d_name);
 	}
 	closedir(d);
+	for (i = 1; i < n; i++)
+		for (j = i; j > 0 && strcmp(noms[j - 1], noms[j]) > 0; j--)
+		{
+			char t[32];
+			memcpy(t, noms[j], 32);
+			memcpy(noms[j], noms[j - 1], 32);
+			memcpy(noms[j - 1], t, 32);
+		}
+	return n;
+}
+
+/*
+ * Field choice on the bottom screen: the pad or the D-pad moves, A loads, START quits. `courant` is the field
+ * shown so far (selected first). Returns 1 with the chosen path, 0 to quit, -1 when there is no package.
+ */
+static int choisir_paquet(char* chemin, size_t taille, const char* courant)
+{
+	static char noms[PAQUETS_MAX][32];
+	int n = lister_paquets(noms), choix = 0, i, attente = 0;
+	if (!n)
+		return -1;
+	for (i = 0; i < n && courant; i++)
+		if (strstr(courant, noms[i]))
+			choix = i;
+	consoleClear();
+	while (aptMainLoop())
+	{
+		u32 appui, tenu;
+		circlePosition pad;
+		hidScanInput();
+		appui = hidKeysDown();
+		tenu = hidKeysHeld();
+		hidCircleRead(&pad);
+		if (appui & KEY_START)
+			return 0;
+		if (appui & KEY_A)
+		{
+			snprintf(chemin, taille, "%s/%s", DOSSIER, noms[choix]);
+			consoleClear();
+			return 1;
+		}
+		if (attente > 0)
+			attente--;
+		else if ((tenu & KEY_DDOWN) || pad.dy < -80)
+			choix = (choix + 1) % n, attente = 10;
+		else if ((tenu & KEY_DUP) || pad.dy > 80)
+			choix = (choix + n - 1) % n, attente = 10;
+		printf("\x1b[1;0Hff7-3d - choisir un ecran\n\n");
+		for (i = 0; i < n && i < 20; i++)
+			printf("%s %-28s\n", i == choix ? ">" : " ", noms[i]);
+		printf("\n A charger   START quitter\n");
+		gspWaitForVBlank();
+	}
 	return 0;
 }
 
@@ -616,12 +670,17 @@ int main(int argc, char** argv)
 	printf("ff7-3d - visualiseur de relief\n\n");
 	if (argc > 1)
 		snprintf(chemin, sizeof(chemin), "%s", argv[1]);
-	else if (!chercher_paquet(chemin, sizeof(chemin)))
+	else
 	{
-		attendre_start("Aucun paquet .f3d dans\n" DOSSIER "\n\nGenerez-le sur PC avec\noutils/atelier.py (voir port3ds/README.md).");
-		C3D_Fini();
-		gfxExit();
-		return 0;
+		int choix = choisir_paquet(chemin, sizeof(chemin), NULL);
+		if (choix < 0)
+			attendre_start("Aucun paquet .f3d dans\n" DOSSIER "\n\nGenerez-le sur PC avec\noutils/atelier.py (voir port3ds/README.md).");
+		if (choix <= 0)
+		{
+			C3D_Fini();
+			gfxExit();
+			return 0;
+		}
 	}
 	if (!entrer(&et, chemin))
 	{
@@ -654,6 +713,24 @@ int main(int argc, char** argv)
 			break;
 		if (appui & KEY_SELECT)
 			stats = !stats;
+		if (appui & KEY_Y)
+		{
+			/* back to the field list; the chosen field is loaded, or the current one stays */
+			char nouveau[256];
+			int choix = choisir_paquet(nouveau, sizeof(nouveau), chemin);
+			if (choix == 0)
+				break;
+			if (choix > 0 && strcmp(nouveau, chemin) != 0)
+			{
+				if (entrer(&et, nouveau))
+					snprintf(chemin, sizeof(chemin), "%s", nouveau);
+				else if (!entrer(&et, chemin))
+					break;
+				decal_x = decal_y = 0.0f;
+			}
+			consoleClear();
+			continue;
+		}
 		hidCircleRead(&pad);
 		if (et.temoin)
 			marcher(&et, &pad, tenu);
@@ -732,7 +809,7 @@ int main(int argc, char** argv)
 			printf("cartes d'occlusion : %u            \n", r->nb_cartes);
 			printf("GPU %4.1f %%  CPU %4.1f %%            \n", C3D_GetDrawingTime() * 6.0f,
 			       C3D_GetProcessingTime() * 6.0f);
-			printf("\nSELECT stats  ZR %s  B courir\nSTART quitter\n", r->a_perso ? "Cloud" : "temoin");
+			printf("\nSELECT stats  ZR %s  B courir\nY ecrans  START quitter\n", r->a_perso ? "Cloud" : "temoin");
 		}
 	}
 
