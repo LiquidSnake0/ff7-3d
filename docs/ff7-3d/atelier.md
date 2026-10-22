@@ -47,6 +47,18 @@ First field, `MD1STIN`: the floor fit has a median relative error of 1.5 % over 
 `MD1_1` and `MD1_2` go through the same pipeline unchanged (floor errors 1.6 % and 0.6 %; `MD1_2` has two
 animation groups).
 
+7. `modele.py`, `rendu.py`: the player's character (`FIELD/CLOUD.BCX`) baked frame by frame into the package,
+   and a painter's-algorithm preview `personnage.png` (`cloud.md`).
+8. `field.py` (`Porte`), `ecrans.py`: the field's exits and the names of their targets, written into the package
+   for the 3DS. `atelier.py MD1STIN --suivre 2` also builds every field reachable through at most two exits
+   (`MD1STIN MD1_1 MD1_2`, about 7 s for the three packages on a laptop CPU).
+
+## Other tools
+
+- `apercu.py`: a PC preview of the relief's parallax.
+- `adresses_ps1.py`: the inventory of the PS1 addresses written in `src/` and `include/` (read only), the step 0
+  of milestone 2 (`jalon2-psyz-3ds.md`); details in `sortie/adresses_ps1.tsv`.
+
 ## Tests
 
 ```shell
