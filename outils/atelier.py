@@ -45,7 +45,7 @@ def traiter(nom, pas=4, etats=None):
     dossier = nom.lower()
     chemin = chemins.sortie(dossier, f"{dossier}.f3d")
     stats = relief.ecrire(chemin, nom, compose.image, z, compose.origine, champ.camera.zoom, z_conv, pas,
-                          relief.cartes_occlusion(champ), relief.masque_occlusion(compose))
+                          relief.cartes_occlusion(champ), relief.masque_occlusion(compose), champ)
     rapport.update(stats)
     rapport.update({"nom": nom, "z_convergence": z_conv, "origine": compose.origine, "zoom": champ.camera.zoom,
                     "groupes": {str(g): e for g, e in fond.groupes(champ).items()}, "etats": etats or {}})
