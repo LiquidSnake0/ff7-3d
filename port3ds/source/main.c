@@ -633,23 +633,23 @@ static int entrer(Etat* et, const char* chemin)
 	et->temoin = r->nb_triangles != 0;
 	if (r->nb_triangles)
 	{
-		/* start at the centre of the walkmesh when it is on the floor, else at the centre of its first
-		 * triangle */
-		int k, t, v;
-		float z;
-		for (k = 0; k < 3; k++)
+		/* start at the centre of the walkmesh triangle that falls nearest the middle of the background: the
+		 * walkmesh often reaches past the picture (MD1_1: up to 290 pixels on the right), so its own centre may
+		 * be off screen (same rule as the workshop's preview, outils/ff7_3d/rendu.py, depart) */
+		int t, k, meilleur = 0;
+		float mx = r->e.ox + r->e.tex_l * 0.5f, my = r->e.oy + r->e.tex_h * 0.5f, d_min = 1e30f;
+		for (t = 0; t < r->nb_triangles; t++)
 		{
-			float somme = 0;
-			for (t = 0; t < r->nb_triangles; t++)
-				for (v = 0; v < 3; v++)
-					somme += r->triangles[t][v][k];
-			et->pied[k] = somme / (3.0f * r->nb_triangles);
-		}
-		if (sol(r, et->pied[0], et->pied[1], &z))
-			et->pied[2] = z;
-		else
+			float c[3], sx, sy, d;
 			for (k = 0; k < 3; k++)
-				et->pied[k] = (r->triangles[0][0][k] + r->triangles[0][1][k] + r->triangles[0][2][k]) / 3.0f;
+				c[k] = (r->triangles[t][0][k] + r->triangles[t][1][k] + r->triangles[t][2][k]) / 3.0f;
+			projeter(r, c, &sx, &sy);
+			d = (sx - mx) * (sx - mx) + (sy - my) * (sy - my);
+			if (d < d_min)
+				d_min = d, meilleur = t;
+		}
+		for (k = 0; k < 3; k++)
+			et->pied[k] = (r->triangles[meilleur][0][k] + r->triangles[meilleur][1][k] + r->triangles[meilleur][2][k]) / 3.0f;
 	}
 	et->xmin = r->e.ox + ECRAN_L / 2;
 	et->xmax = r->e.ox + r->e.tex_l - ECRAN_L / 2;

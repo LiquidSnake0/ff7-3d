@@ -19,6 +19,21 @@ def direction_vers(dx, dy):
     return int(round(a * 256.0 / (2.0 * math.pi))) & 0xFF
 
 
+def depart(champ, compose):
+    """Point de départ du personnage : le centre du triangle du walkmesh qui tombe le plus près du milieu du décor.
+
+    Le walkmesh déborde souvent du décor (MD1_1 : jusqu'à 290 pixels à droite) ; son centre peut être hors champ.
+    Même règle sur la 3DS (port3ds/source/main.c, entrer)."""
+    tri = np.array(champ.walkmesh.triangles, dtype=np.float64)
+    centres = tri.mean(axis=1)
+    ecran, z = camera.projeter(champ.camera, centres)
+    h, l = compose.image.shape[:2]
+    milieu = np.asarray(compose.origine, float) + [l / 2.0, h / 2.0]
+    d = ((ecran - milieu) ** 2).sum(1)
+    d[~(z > 0)] = np.inf
+    return centres[int(np.argmin(d))]
+
+
 def poser(cuisson, anim, image, position, direction):
     """Sommets du personnage dans le monde pour une image d'animation."""
     images = cuisson.animations[anim]
