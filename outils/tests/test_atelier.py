@@ -63,6 +63,18 @@ class TestRecalage(unittest.TestCase):
         self.assertLess(ecart, 0.01)
 
 
+class TestVariantes(unittest.TestCase):
+    @unittest.skipUnless(DISQUE_PRESENT, "disque du joueur absent")
+    def test_md1_2_a_des_groupes_et_ils_s_affichent_sur_demande(self):
+        with Disque(chemins.DISQUE) as d:
+            champ, mim = field.charger(d, "MD1_2")
+        g = fond.groupes(champ)
+        self.assertEqual(g, {1: [1, 2, 4, 8], 2: [1]})
+        base = fond.composer(champ, mim)
+        allume = fond.composer(champ, mim, {1: 1, 2: 1})
+        self.assertFalse(np.array_equal(base.image, allume.image))
+
+
 class TestRelief(unittest.TestCase):
     def test_tuilage_pica200(self):
         img = np.arange(16 * 16, dtype=np.uint16).reshape(16, 16)
@@ -82,6 +94,9 @@ class TestRelief(unittest.TestCase):
         self.assertEqual(len(sommets), 9 * 9)
         self.assertEqual(len(tris), 8 * 8 * 6)
         self.assertEqual(sommets[0, :2].tolist(), [-32.0, -32.0])
+        # sur la rupture (colonne 32 : 1000 à gauche, 2000 à droite), le sommet prend le plus proche
+        self.assertEqual(float(sommets[4, 2]), 1000.0)
+        self.assertEqual(float(sommets[5, 2]), 2000.0)
         self.assertAlmostEqual(float(sommets[0, 4]), 1.0)  # v = 1 en haut (texture rangée du bas vers le haut)
         image = np.zeros((64, 64, 4), dtype=np.uint8)
         with tempfile.TemporaryDirectory() as d:
