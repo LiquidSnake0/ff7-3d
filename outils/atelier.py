@@ -35,7 +35,8 @@ def traiter(nom, pas=4):
     z_conv = float(np.median(sol)) if sol.size else float(np.median(z))
     dossier = nom.lower()
     chemin = chemins.sortie(dossier, f"{dossier}.f3d")
-    stats = relief.ecrire(chemin, nom, compose.image, z, compose.origine, champ.camera.zoom, z_conv, pas)
+    stats = relief.ecrire(chemin, nom, compose.image, z, compose.origine, champ.camera.zoom, z_conv, pas,
+                          relief.cartes_occlusion(champ), relief.masque_occlusion(compose))
     rapport.update(stats)
     rapport.update({"nom": nom, "z_convergence": z_conv, "origine": compose.origine, "zoom": champ.camera.zoom})
     try:
@@ -59,7 +60,7 @@ def main():
     for nom in a.ecrans:
         chemin, rapport = traiter(nom, a.pas)
         print(f"{nom} -> {chemin} ({rapport['sommets']} sommets, {rapport['triangles']} triangles, "
-              f"{rapport['octets'] // 1024} Ko, écart médian du sol {100 * rapport['ecart_median_relatif']:.1f} %)")
+              f"{rapport['cartes']} cartes d'occlusion, {rapport['octets'] // 1024} Ko, écart médian du sol {100 * rapport['ecart_median_relatif']:.1f} %)")
 
 
 if __name__ == "__main__":

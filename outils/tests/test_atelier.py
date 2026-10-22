@@ -86,10 +86,14 @@ class TestRelief(unittest.TestCase):
         image = np.zeros((64, 64, 4), dtype=np.uint8)
         with tempfile.TemporaryDirectory() as d:
             chemin = os.path.join(d, "t.f3d")
-            stats = relief.ecrire(chemin, "TEST", image, z, (-32, -32), 386, 1200.0, pas=8)
+            stats = relief.ecrire(chemin, "TEST", image, z, (-32, -32), 386, 1200.0, pas=8,
+                                  cartes=[(0, 0, 16, 2, 300)], masque=np.full((64, 64), 255, np.uint8))
             e = relief.lire_en_tete(chemin)
             self.assertEqual(os.path.getsize(chemin), stats["octets"])
+            attendu = 64 + 64 * 64 * 2 + 81 * 20 + 8 * 8 * 6 * 2 + 2 + 8 + 64 * 64
+            self.assertEqual(stats["octets"], attendu)
         self.assertEqual((e["magie"], e["nom"], e["tex_l"], e["nb_sommets"], e["zoom"]), (b"F3D1", "TEST", 64, 81, 386))
+        self.assertEqual(e["version"], 2)
         self.assertEqual(e["nb_indices"], 8 * 8 * 6)
 
 
@@ -149,6 +153,14 @@ class TestMd1stin(unittest.TestCase):
         self.assertTrue(250 < sol.min() < sol.max() < 2400)
         self.assertEqual(set(np.unique(rp.z_tuiles[np.isfinite(rp.z_tuiles)])), {608.0, 1176.0, 2176.0})
         self.assertTrue(np.isinf(rp.z_occlusion[r.couche == 1]).all())
+
+    def test_cartes_d_occlusion(self):
+        cartes = relief.cartes_occlusion(self.champ)
+        ids = sorted({c[4] for c in cartes})
+        # couche 2 seulement sur MD1STIN : les tuiles « toujours devant » (ID 1) et le train (152 à 544) ;
+        # celles d'ID 4087-4088 sont au fond et n'occultent rien
+        self.assertEqual(ids, [1, 152, 294, 544])
+        self.assertTrue(all(c[3] == 2 and c[2] == 16 for c in cartes))
 
 
 if __name__ == "__main__":
