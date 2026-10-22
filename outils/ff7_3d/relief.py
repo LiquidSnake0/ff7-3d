@@ -85,7 +85,7 @@ def tuiler(image):
     if h % 8 or l % 8:
         raise ValueError("la texture doit être un multiple de 8")
     ys, xs = np.mgrid[0:h, 0:l]
-    yb = h - 1 - ys  # la PICA200 range les lignes du bas vers le haut
+    yb = ys  # avec t = 1 - y/h côté sommets, la ligne 0 de l'image va en tête de la mémoire (essai console du 23.10.2026)
     index = ((yb // 8) * (l // 8) + xs // 8) * 64 + morton8(xs % 8, yb % 8)
     sortie = np.empty(h * l, dtype=image.dtype)
     sortie[index.ravel()] = image.reshape(h * l, *image.shape[2:]) if image.ndim > 2 else image.ravel()

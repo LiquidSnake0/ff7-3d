@@ -517,9 +517,9 @@ static void afficher_sorties(const Relief* r)
 static void dessiner(Relief* r, float cx, float cy, const float stereo[4], int avec_temoin)
 {
 	C3D_Mtx projection;
-	/* The visible window, in PS1 screen pixels; y grows downwards like on the PS1. First run on a New 3DS
-	 * (23.10.2026): with bottom = cy + H/2 the picture came out upside down, so bottom and top are swapped. */
-	Mtx_OrthoTilt(&projection, cx - ECRAN_L / 2, cx + ECRAN_L / 2, cy - ECRAN_H / 2, cy + ECRAN_H / 2, -32769.0f,
+	/* The visible window, in PS1 screen pixels; y grows downwards like on the PS1 (same construction as CTR-3D).
+	 * The upside-down picture of the first console run came from the texture rows, not from this matrix. */
+	Mtx_OrthoTilt(&projection, cx - ECRAN_L / 2, cx + ECRAN_L / 2, cy + ECRAN_H / 2, cy - ECRAN_H / 2, -32769.0f,
 	              32769.0f, true);
 	C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, s_uProjection, &projection);
 	C3D_FVUnifSet(GPU_VERTEX_SHADER, s_uH, (float)r->e.zoom, 1.0f / (float)r->e.zoom, 0.0f, 0.0f);
