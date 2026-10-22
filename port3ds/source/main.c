@@ -10,12 +10,14 @@
  * it on the top screen with the 3D slider. The stereo model, the depth substrate and the render-target setup
  * follow CTR-3D (https://github.com/zando95/CTR-3D, GPL-3.0); see source/relief.v.pica.
  *
- * Controls: circle pad / D-pad scroll, L / R move the convergence plane, Y / A move the test object sideways,
- * X / B move it in depth, ZR shows or hides it, SELECT toggles the frame stats, START quits.
+ * Controls: the circle pad walks a test character on the field's walkmesh (the view follows it), the D-pad
+ * shifts the view, L / R move the convergence plane, ZR hides the character (the pad then scrolls the view),
+ * SELECT toggles the frame stats, START quits.
  */
 #include <3ds.h>
 #include <citro3d.h>
 #include <dirent.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -59,8 +61,13 @@ typedef struct
 	float* cartes;    /* 4 vertices per card */
 	u16* idx_cartes;  /* 6 indices per card */
 	u16 nb_cartes;
-	float* temoin;    /* test object: a quad at a chosen depth, moved with Y / A (x) and X / B (depth) */
+	float* temoin;    /* test character: a quad standing on the walkmesh */
 	u16* idx_temoin;
+	/* Field camera and walkmesh (package version 3). */
+	float axes[3][3];
+	float trans[3];
+	u16 nb_triangles;
+	s16 (*triangles)[3][3]; /* world x, y, z (z up) */
 } Relief;
 
 /* One card of the package, as written by outils/ff7_3d/relief.py. */
@@ -148,6 +155,27 @@ static int charger_occlusion(FILE* f, Relief* r)
 	C3D_TexSetFilter(&r->masque, GPU_NEAREST, GPU_NEAREST);
 	C3D_TexSetWrap(&r->masque, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
 
+	{
+		s16 m[9];
+		s32 t[3];
+		s16 zoom;
+		int i2, j;
+		if (fread(m, sizeof(m), 1, f) != 1 || fread(t, sizeof(t), 1, f) != 1 || fread(&zoom, 2, 1, f) != 1 ||
+		    fread(&r->nb_triangles, 2, 1, f) != 1)
+			return 0;
+		for (i2 = 0; i2 < 3; i2++)
+		{
+			for (j = 0; j < 3; j++)
+				r->axes[i2][j] = m[i2 * 3 + j] / 4096.0f;
+			r->trans[i2] = (float)t[i2];
+		}
+		r->triangles = malloc((size_t)(r->nb_triangles ? r->nb_triangles : 1) * sizeof(*r->triangles));
+		if (!r->triangles)
+			return 0;
+		if (r->nb_triangles && fread(r->triangles, sizeof(*r->triangles), r->nb_triangles, f) != r->nb_triangles)
+			return 0;
+	}
+
 	r->temoin = linearAlloc(4 * 5 * sizeof(float));
 	r->idx_temoin = linearAlloc(6 * sizeof(u16));
 	if (!r->temoin || !r->idx_temoin)
@@ -169,7 +197,7 @@ static int charger_relief(const char* chemin, Relief* r)
 	void* tampon;
 	if (!f)
 		return 0;
-	if (fread(&r->e, sizeof(r->e), 1, f) != 1 || memcmp(r->e.magie, "F3D1", 4) != 0 || r->e.version != 2)
+	if (fread(&r->e, sizeof(r->e), 1, f) != 1 || memcmp(r->e.magie, "F3D1", 4) != 0 || r->e.version != 3)
 	{
 		fclose(f);
 		return 0;
@@ -254,13 +282,63 @@ static void combiner(C3D_Tex* texture, u32 couleur)
 	C3D_TexEnvFunc(env, C3D_Both, GPU_REPLACE);
 }
 
-static void placer_temoin(Relief* r, float tx, float ty, float tz)
+/* GTE projection of the field camera: c = R v + t, sx = H cx / cz, sy = H cy / cz (outils/ff7_3d/camera.py). */
+static float projeter(const Relief* r, const float v[3], float* sx, float* sy)
 {
-	sommet(r->temoin + 0, tx - 10, ty - 40, tz, &r->e);
-	sommet(r->temoin + 5, tx + 10, ty - 40, tz, &r->e);
-	sommet(r->temoin + 10, tx - 10, ty, tz, &r->e);
-	sommet(r->temoin + 15, tx + 10, ty, tz, &r->e);
+	float c[3];
+	int i;
+	for (i = 0; i < 3; i++)
+		c[i] = r->axes[i][0] * v[0] + r->axes[i][1] * v[1] + r->axes[i][2] * v[2] + r->trans[i];
+	if (c[2] < 1.0f)
+		c[2] = 1.0f;
+	*sx = r->e.zoom * c[0] / c[2];
+	*sy = r->e.zoom * c[1] / c[2];
+	return c[2];
+}
+
+/* Height of the floor under (x, y), or 0 when (x, y) is off the walkmesh. */
+static int sol(const Relief* r, float x, float y, float* z)
+{
+	int i;
+	for (i = 0; i < r->nb_triangles; i++)
+	{
+		const s16(*t)[3] = r->triangles[i];
+		float ax = t[0][0], ay = t[0][1], bx = t[1][0], by = t[1][1], cx = t[2][0], cy = t[2][1];
+		float aire = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+		float w0, w1, w2;
+		if (aire > -1e-3f && aire < 1e-3f)
+			continue;
+		w0 = ((bx - x) * (cy - y) - (by - y) * (cx - x)) / aire;
+		w1 = ((cx - x) * (ay - y) - (cy - y) * (ax - x)) / aire;
+		w2 = 1.0f - w0 - w1;
+		if (w0 >= -1e-4f && w1 >= -1e-4f && w2 >= -1e-4f)
+		{
+			*z = w0 * t[0][2] + w1 * t[1][2] + w2 * t[2][2];
+			return 1;
+		}
+	}
+	return 0;
+}
+
+/* Height of the test character, in world units. A guess for now: Cloud's real model comes with step 10. */
+#define HAUTEUR_TEMOIN 100.0f
+
+/* Stands the test character at its world position: a quad from the feet to the head, both projected, so its
+ * size and depth come from the field camera exactly like a real model's. Returns the feet's screen position. */
+static void placer_temoin(Relief* r, const float pied[3], float* px, float* py)
+{
+	float tete[3] = {pied[0], pied[1], pied[2] + HAUTEUR_TEMOIN};
+	float sxp, syp, sxt, syt, zp, zt, demi;
+	zp = projeter(r, pied, &sxp, &syp);
+	zt = projeter(r, tete, &sxt, &syt);
+	demi = 0.2f * (syp - syt);
+	sommet(r->temoin + 0, sxt - demi, syt, zt, &r->e);
+	sommet(r->temoin + 5, sxt + demi, syt, zt, &r->e);
+	sommet(r->temoin + 10, sxp - demi, syp, zp, &r->e);
+	sommet(r->temoin + 15, sxp + demi, syp, zp, &r->e);
 	GSPGPU_FlushDataCache(r->temoin, 4 * 5 * sizeof(float));
+	*px = sxp;
+	*py = syp;
 }
 
 /*
@@ -322,7 +400,8 @@ int main(int argc, char** argv)
 	char chemin[256];
 	C3D_RenderTarget *gauche, *droite;
 	float cx = 0.0f, cy = 0.0f, convergence;
-	float tx = 0.0f, tz;
+	float pied[3] = {0, 0, 0};
+	float decal_x = 0.0f, decal_y = 0.0f;
 	int temoin = 1;
 	float xmin, xmax, ymin, ymax;
 	int stats = 1;
@@ -368,7 +447,28 @@ int main(int argc, char** argv)
 		return 0;
 	}
 	convergence = relief.e.z_convergence;
-	tz = convergence;
+	if (relief.nb_triangles)
+	{
+		/* start at the centre of the walkmesh when it is on the floor, else at the centre of its first
+		 * triangle */
+		int k, t, v;
+		float z;
+		for (k = 0; k < 3; k++)
+		{
+			float somme = 0;
+			for (t = 0; t < relief.nb_triangles; t++)
+				for (v = 0; v < 3; v++)
+					somme += relief.triangles[t][v][k];
+			pied[k] = somme / (3.0f * relief.nb_triangles);
+		}
+		if (sol(&relief, pied[0], pied[1], &z))
+			pied[2] = z;
+		else
+			for (k = 0; k < 3; k++)
+				pied[k] = (relief.triangles[0][0][k] + relief.triangles[0][1][k] + relief.triangles[0][2][k]) / 3.0f;
+	}
+	else
+		temoin = 0;
 	xmin = relief.e.ox + ECRAN_L / 2;
 	xmax = relief.e.ox + relief.e.tex_l - ECRAN_L / 2;
 	ymin = relief.e.oy + ECRAN_H / 2;
@@ -400,25 +500,58 @@ int main(int argc, char** argv)
 		if (appui & KEY_SELECT)
 			stats = !stats;
 		hidCircleRead(&pad);
-		cx += pad.dx / 40.0f + ((tenu & KEY_DRIGHT) ? 2 : 0) - ((tenu & KEY_DLEFT) ? 2 : 0);
-		cy -= pad.dy / 40.0f;
-		cy += ((tenu & KEY_DDOWN) ? 2 : 0) - ((tenu & KEY_DUP) ? 2 : 0);
-		cx = cx < xmin ? xmin : (cx > xmax ? xmax : cx);
-		cy = cy < ymin ? ymin : (cy > ymax ? ymax : cy);
-		if (tenu & KEY_A)
-			tx += 2.0f;
-		if (tenu & KEY_Y)
-			tx -= 2.0f;
-		if (tenu & KEY_X)
-			tz *= 1.02f;
-		if (tenu & KEY_B)
-			tz /= 1.02f;
+		if (temoin)
+		{
+			/* Walk on the walkmesh: the pad moves the character along the screen's right and forward axes,
+			 * projected on the ground; a step that leaves the walkmesh is refused, like a blocked edge. */
+			float dx = pad.dx / 156.0f, dy = pad.dy / 156.0f, nx, ny, nz, avant[2], droite[2], n;
+			droite[0] = relief.axes[0][0];
+			droite[1] = relief.axes[0][1];
+			avant[0] = relief.axes[2][0];
+			avant[1] = relief.axes[2][1];
+			n = sqrtf(droite[0] * droite[0] + droite[1] * droite[1]);
+			if (n > 0)
+				droite[0] /= n, droite[1] /= n;
+			n = sqrtf(avant[0] * avant[0] + avant[1] * avant[1]);
+			if (n > 0)
+				avant[0] /= n, avant[1] /= n;
+			nx = pied[0] + 12.0f * (dx * droite[0] + dy * avant[0]);
+			ny = pied[1] + 12.0f * (dx * droite[1] + dy * avant[1]);
+			if ((dx != 0 || dy != 0) && sol(&relief, nx, ny, &nz))
+			{
+				pied[0] = nx;
+				pied[1] = ny;
+				pied[2] = nz;
+			}
+		}
+		else
+		{
+			decal_x += pad.dx / 40.0f;
+			decal_y -= pad.dy / 40.0f;
+		}
+		decal_x += ((tenu & KEY_DRIGHT) ? 2 : 0) - ((tenu & KEY_DLEFT) ? 2 : 0);
+		decal_y += ((tenu & KEY_DDOWN) ? 2 : 0) - ((tenu & KEY_DUP) ? 2 : 0);
 		if (appui & KEY_ZR)
-			temoin = !temoin;
+			temoin = !temoin && relief.nb_triangles;
 		if (tenu & KEY_R)
 			convergence *= 1.02f;
 		if (tenu & KEY_L)
 			convergence /= 1.02f;
+		if (temoin)
+		{
+			float px, py;
+			placer_temoin(&relief, pied, &px, &py);
+			/* the view follows the character, like the field camera scroll */
+			cx = px + decal_x;
+			cy = py - 40.0f + decal_y;
+		}
+		else
+		{
+			cx = decal_x;
+			cy = decal_y;
+		}
+		cx = cx < xmin ? xmin : (cx > xmax ? xmax : cx);
+		cy = cy < ymin ? ymin : (cy > ymax ? ymax : cy);
 
 		curseur = osGet3DSliderState();
 		actif = curseur > 0.01f;
@@ -426,7 +559,6 @@ int main(int argc, char** argv)
 		vecteur_oeil(-k, convergence, oeil[0]); /* left eye */
 		vecteur_oeil(k, convergence, oeil[1]);  /* right eye: far content shifts right */
 
-		placer_temoin(&relief, cx + tx, cy + 60.0f, tz);
 		C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
 		C3D_RenderTargetClear(gauche, C3D_CLEAR_ALL, 0x000000FF, 0x00FFFFFF);
 		C3D_FrameDrawOn(gauche);
@@ -451,7 +583,7 @@ int main(int argc, char** argv)
 			printf("curseur 3D : %3.0f %%  ecart : %4.1f px    \n", curseur * 100.0f, 2 * k);
 			printf("convergence z : %6.0f (L / R)       \n", convergence);
 			printf("vue : %5.0f, %5.0f (pad)          \n", cx, cy);
-			printf("temoin : x %+5.0f  z %6.0f (Y A / X B)  \n", tx, tz);
+			printf("temoin : %6.0f %6.0f %5.0f (ZR)  \n", pied[0], pied[1], pied[2]);
 			printf("cartes d'occlusion : %u            \n", relief.nb_cartes);
 			printf("GPU %4.1f %%  CPU %4.1f %%            \n", C3D_GetDrawingTime() * 6.0f,
 			       C3D_GetProcessingTime() * 6.0f);
@@ -465,6 +597,7 @@ int main(int argc, char** argv)
 	linearFree(relief.idx_cartes);
 	linearFree(relief.temoin);
 	linearFree(relief.idx_temoin);
+	free(relief.triangles);
 	linearFree(relief.sommets);
 	linearFree(relief.indices);
 	shaderProgramFree(&s_programme);
