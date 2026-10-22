@@ -70,6 +70,13 @@ class TestCloud(unittest.TestCase):
         self.assertEqual((c.global_id, c.nb_os, c.nb_parties), (1, 22, 15))
         self.assertEqual(modele.personnage_du_joueur(champ), "CLOUD")
 
+    def test_cuisson(self):
+        c = modele.cuire(self.cloud)
+        self.assertEqual(c.nb_sommets, 298)
+        self.assertEqual([a.shape for a in c.animations], [(1, 298, 3), (30, 298, 3), (15, 298, 3)])
+        self.assertTrue(all(max(t[:3]) < c.nb_sommets for t in c.triangles))
+        self.assertTrue(115 < c.hauteur < 140)
+
     def test_la_marche_bouge_les_jambes(self):
         r, t = modele.racine(np.eye(3), np.zeros(3), np.zeros(3), 0)
         a = np.concatenate(modele.sommets_monde(self.cloud, modele.matrices(self.cloud, 1, 0, r, t)))

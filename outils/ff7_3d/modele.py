@@ -235,3 +235,32 @@ def triangles(polygone):
     if len(polygone.sommets) == 3:
         return [(0, 1, 2)]
     return [(0, 1, 2), (1, 3, 2)]
+
+
+@dataclass
+class Cuisson:
+    """Un personnage prêt pour la 3DS : sommets par image (repère du monde, pieds à l'origine, direction 0)
+    et triangles colorés. La 3DS n'a plus qu'à tourner autour de z, poser sur le sol et projeter."""
+    nb_sommets: int
+    triangles: list         # (i0, i1, i2, (r, g, b) * 3) indices globaux
+    animations: list        # par animation : tableau (images, nb_sommets, 3) float32
+    hauteur: float
+
+
+def cuire(modele, animations=None):
+    """Calcule toutes les images des animations demandées (toutes par défaut)."""
+    debuts = np.cumsum([0] + [len(p.sommets) for p in modele.parties])
+    tris = []
+    for p, d in zip(modele.parties, debuts):
+        for pg in p.polygones:
+            for a, b, c in triangles(pg):
+                tris.append((int(d + pg.sommets[a]), int(d + pg.sommets[b]), int(d + pg.sommets[c]),
+                             pg.couleurs[a], pg.couleurs[b], pg.couleurs[c]))
+    r, t = racine(np.eye(3), np.zeros(3), np.zeros(3), 0)
+    anims = []
+    for k in (range(len(modele.animations)) if animations is None else animations):
+        a = modele.animations[k]
+        images = [np.concatenate(sommets_monde(modele, matrices(modele, k, i, r, t))) for i in range(a.nb_images)]
+        anims.append(np.asarray(images, dtype=np.float32))
+    hauteur = float(anims[0][0][:, 2].max()) if anims else 0.0
+    return Cuisson(int(debuts[-1]), tris, anims, hauteur)
