@@ -1,3 +1,28 @@
+# ff7-3d — Final Fantasy VII in real stereoscopic 3D on the New Nintendo 3DS
+
+**This fork is a separate project built on top of [Xeeynamo/ff7-decomp](https://github.com/Xeeynamo/ff7-decomp).**
+All credit for the decompilation goes to Xeeynamo and the ff7-decomp contributors.
+ff7-3d does **no decompilation work** and does not touch the decompiled game code in `src/`.
+It adds, in its own directories:
+
+- `outils/` — a workshop that runs on the player's PC: it reads the field screens from the player's own disc,
+  rebuilds the background images, the camera and the walkmesh, and generates a depth relief for every
+  pre-rendered background (exact depth anchors from the game data + a monocular depth model).
+- `port3ds/` — a Nintendo 3DS viewer, then backend, that draws those reliefs in stereoscopic 3D with citro3d.
+- `docs/ff7-3d/` — the roadmap and the architecture.
+
+The 3DS side follows the architecture of [zando95/CTR-3D](https://github.com/zando95/CTR-3D) (GPL-3.0), the first
+port of a PS1 decompilation to the New 3DS with stereoscopic 3D. Any code reused from CTR-3D keeps its original
+copyright header; GPL-3.0 code may be combined with AGPL-3.0 code (section 13 of both licenses).
+
+**No game data is distributed.** Not the disc files, not textures, not backgrounds, not depth maps, not meshes:
+everything is generated on the player's machine from their own *Final Fantasy VII (USA) (Disc 1)* image.
+The whole project stays under the [AGPL-3.0](./LICENSE), like ff7-decomp.
+
+Status: milestone 1 in progress — one Midgar field in stereoscopic 3D. See [docs/ff7-3d](./docs/ff7-3d/README.md).
+
+---
+
 # Final Fantasy VII decomp (PS1)
 
 ## Contribute
