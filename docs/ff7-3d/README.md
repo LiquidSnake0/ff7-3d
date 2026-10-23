@@ -56,7 +56,8 @@ Target field: `MD1STIN` (index 116 in `g_FieldFileInfo`), then `MD1_1`.
 3. [x] Background composer: 4 layers, CLUT decode, semi-transparency, variants (`parameter & 0x3F`, `state`).
 4. [x] Camera and walkmesh, GTE projection of the floor onto the background.
 5. [x] Depth anchors: floor, layer-2 tiles, layers 3/4; occlusion depth map.
-6. [x] Depth model on the composed background, fitted on the anchors.
+6. [x] Depth model on the composed background, fitted on the anchors; walls and drops extruded from the
+   walkmesh's blocked edges where the model agrees (`murs.py`), so the floor meets the walls with a clean break.
 7. [x] Relief mesh (regular 4 px grid; cutting it at depth discontinuities is still to do) and the package format read by the 3DS.
 8. [~] 3DS viewer: relief in stereo with the 3D slider, frame counter. Built (`port3ds/`), not yet run on hardware.
 9. [~] Occlusion pass and a test object passing behind a layer-2 pillar. Built (package v2, 296 cards on `MD1STIN`), not yet run on hardware.

@@ -36,6 +36,14 @@ Other locations: `FF7_3D_DAV2`, `FF7_3D_POIDS`, `FF7_3D_DISQUE`, `FF7_3D_SORTIE`
 5. `profondeur.py`: Depth Anything V2 Small gives a relative disparity `d`; `1/z = a d + b` is fitted on the
    anchors (weighted, robust); the floor is then taken exactly; each layer-2 tile is shifted onto `4 x ID`
    only when that ID agrees with the model within 30 % (IDs are first a sorting key).
+   `murs.py`: where the walkmesh stops (an edge without a neighbour), the model is compared with three
+   hypotheses sampled along their own lines (a wall rising vertically, the floor going on, a drop); a wall or a
+   drop that the model agrees with (within 30 %, at least 24 units high) is extruded from the edge with the
+   exact depth of its vertical, up to the height where the model stops agreeing, never over the floor nor over
+   what the model places elsewhere (a pillar in front, an open door). The monocular model tends to carry the
+   floor on into the wall as a gentle slope: on pixelated backgrounds a wall and the floor looked alike.
+   `sortie/<field>/murs.png` shows the verdict per edge (red wall, blue drop, green the floor goes on, yellow
+   no opinion) and the height kept, in magenta.
 
 6. `relief.py`: a 4 px grid; a vertex takes the median depth of its cell, or the nearest one across a depth
    break (more than 15 %), so a foreground silhouette stays sharp; the occlusion cards (one per occluding tile,

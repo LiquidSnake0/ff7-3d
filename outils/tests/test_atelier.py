@@ -10,7 +10,7 @@ import numpy as np
 
 import tempfile
 
-from ff7_3d import camera, chemins, field, fond, lzs, profondeur, relief, reperes
+from ff7_3d import camera, chemins, field, fond, lzs, murs, profondeur, relief, reperes
 from ff7_3d.disque import Disque
 from ff7_3d.vram import Vram
 
@@ -194,6 +194,62 @@ class TestMd1stin(unittest.TestCase):
         # celles d'ID 4087-4088 sont au fond et n'occultent rien
         self.assertEqual(ids, [1, 152, 294, 544])
         self.assertTrue(all(c[3] == 2 and c[2] == 16 for c in cartes))
+
+
+@unittest.skipUnless(DISQUE_PRESENT, "disque absent")
+class TestMurs(unittest.TestCase):
+    """MD1STIN : le mur de gauche du quai s'élève des arêtes bloquées du walkmesh."""
+
+    @classmethod
+    def setUpClass(cls):
+        with Disque(chemins.DISQUE) as d:
+            cls.champ, cls.mim = field.charger(d, "MD1STIN")
+        cls.compose = fond.composer(cls.champ, cls.mim)
+        cls.rp = reperes.calculer(cls.champ, cls.compose)
+
+    def test_aretes_bloquees(self):
+        aretes = list(murs.aretes_bloquees(self.champ))
+        # 3 arêtes par triangle moins les voisinages : chaque voisinage compte deux fois
+        nb_voisins = sum(v >= 0 for a in self.champ.walkmesh.acces for v in a)
+        self.assertEqual(len(aretes), 3 * len(self.champ.walkmesh.triangles) - nb_voisins)
+
+    def test_un_mur_est_extrude(self):
+        # un modèle « sol qui continue » partout (plan du sol prolongé) : la verticale au-dessus d'une arête de
+        # gauche reçoit la profondeur exacte du mur, et le sol n'est pas touché
+        h, l = self.compose.image.shape[:2]
+        z = np.where(np.isfinite(self.rp.z_sol), self.rp.z_sol, np.nan)
+        # un faux modèle : au-dessus du quai, la profondeur de la verticale (comme si le modèle voyait le mur)
+        def quad_de(a):
+            A, B = a[0], a[1]
+            return [(A, B, B + [0, 0, 300]), (A, B + [0, 0, 300], A + [0, 0, 300])]
+        # l'arête dont le mur de 300 unités couvre le plus de pixels hors sol, et dont la verticale ne passe pas
+        # devant du sol visible (le bord bas du quai, vu de dessus, a le quai derrière lui : pas un mur)
+        def couverture(a):
+            M = (a[0] + a[1]) / 2.0
+            _zp, _zm, sol = murs._profil(self.champ.camera, z, self.rp.z_sol, self.compose.origine, M,
+                                         np.array([0.0, 0.0, 1.0]))
+            if sol[:5].any():
+                return -1
+            zq = reperes.rasteriser(self.champ.camera, (h, l), self.compose.origine, quad_de(a))
+            return int((np.isfinite(zq) & ~np.isfinite(self.rp.z_sol)).sum())
+        A, B, C = max(murs.aretes_bloquees(self.champ), key=couverture)
+        zq = reperes.rasteriser(self.champ.camera, (h, l), self.compose.origine, quad_de((A, B)))
+        z = np.where(np.isfinite(zq) & ~np.isfinite(z), zq * 1.05, z)
+        z = np.where(np.isfinite(z), z, 30000.0)  # ailleurs, le fond lointain
+        classe, hauteur = murs.classer(self.champ.camera, z, self.rp.z_sol, self.compose.origine, A, B, C)
+        self.assertEqual(classe, "mur")
+        self.assertGreaterEqual(hauteur, 200)
+        z2, bilan, aretes = murs.appliquer(z, self.champ, self.compose, self.rp)
+        self.assertGreaterEqual(bilan["murs"], 1)
+        sol = np.isfinite(self.rp.z_sol)
+        np.testing.assert_array_equal(z2[sol], z[sol])
+        # sur le mur à la hauteur retenue : la profondeur exacte de la verticale (un autre mur plus proche
+        # peut gagner par endroits, jamais plus loin que le faux modèle)
+        zh = reperes.rasteriser(self.champ.camera, (h, l), self.compose.origine,
+                                [(A, B, B + [0, 0, hauteur]), (A, B + [0, 0, hauteur], A + [0, 0, hauteur])])
+        accord = np.isfinite(zh) & ~sol
+        self.assertTrue((z2[accord] <= z[accord] + 1e-6).all())
+        self.assertLess(np.median(np.abs(z2[accord] / zh[accord] - 1.0)), 1e-3)
 
 
 @unittest.skipUnless(DISQUE_PRESENT, "disque absent")
