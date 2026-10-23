@@ -107,7 +107,7 @@ static shaderProgram_s s_programme_modele;
 static int s_uProjection, s_uH, s_uStereo;
 
 /* Total disparity at infinity, in PS1 pixels, at full slider (CTR-3D uses 12). */
-static const float ECART_STEREO = 8.0f; /* 12 (CTR-3D) was too strong on FF7's backgrounds at full slider */
+static const float ECART_STEREO = 6.0f; /* 12 (CTR-3D), then 8, were too strong on FF7's backgrounds at full slider */
 
 #define PAQUETS_MAX 64
 
@@ -561,14 +561,16 @@ static void dessiner(Relief* r, float cx, float cy, const float stereo[4], int a
 	}
 }
 
-/* p = k - kC/depth, clamped: far content recedes up to k, near content pops out up to 2k (CTR-3D's default). */
+/* u = 1 - C/depth, softened on the near side (u' = u / (1 + max(-u, 0))), p = k u': far content recedes up to k,
+ * near content pops out up to k, smoothly (CTR-3D clamps at 2k: too strong at full slider on these backgrounds,
+ * and the hard edge of the clamp showed). */
 static void vecteur_oeil(float k, float convergence, float v[4])
 {
 	float a = k < 0 ? -k : k;
 	v[0] = k;
-	v[1] = k * convergence;
-	v[2] = -2.0f * a;
-	v[3] = 2.0f * a;
+	v[1] = convergence;
+	v[2] = -a;
+	v[3] = a;
 }
 
 static void relief_liberer(Relief* r)

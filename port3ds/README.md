@@ -10,7 +10,10 @@ The game itself (ff7-decomp through a PsyZ 3DS backend) comes later; this viewer
   A package is generated on your PC from your own disc by `outils/atelier.py`; it is never distributed.
 - Draws the relief with citro3d. The vertex shader (`source/relief.v.pica`) is adapted from CTR-3D's model shader:
   `w = z / H`, perspective-correct depth, and the stereo parallax `p = k - kC/z` with `k` set by the 3D slider
-  (8 PS1 pixels of total disparity at infinity at full slider; CTR-3D's 12 was too strong on a still background).
+  (6 PS1 pixels of total disparity at infinity at full slider; CTR-3D's 12, then 8, were too strong on a still
+  background). The near side is softened instead of clamped: `u = 1 - C/z`, `u' = u / (1 + max(-u, 0))`,
+  `p = k u'`, so what pops out never exceeds what recedes and there is no hard clamp edge to catch the eye
+  (the floor at the bottom of the screen used to flicker at full slider).
 - Left eye always, right eye only when the slider is up, like CTR-3D.
 - Occlusion of the original game (milestone 1, step 9): after the relief (colour only), one flat card per
   occluding tile is drawn at `z = 4 x ID`, depth only, alpha-tested against the mask of the texels that occlude;
