@@ -35,6 +35,10 @@ typedef struct
 	float hauteur;
 	u16* sommets_tri;                      /* nb_triangles x 3 vertex indices */
 	u8* couleurs;                          /* nb_triangles x 3 x rgb */
+	/* The PS1 sorting rule: one ordering-table slot per polygon. For each triangle, the vertices whose camera
+	 * depths are averaged (the 4 of a quad for both halves, its own 3 otherwise) and their count. */
+	u16* sommets_tri_prof;                 /* nb_triangles x 4 */
+	u8* nb_prof;                           /* nb_triangles: 3 or 4 */
 	u16 nb_images[PERSONNAGE_ANIMS_MAX];
 	float* images[PERSONNAGE_ANIMS_MAX];   /* nb_images x nb_sommets x xyz */
 	float* ecran;                          /* nb_sommets x (sx, sy, z), this frame */
@@ -48,6 +52,11 @@ int personnage_charger(FILE* f, Personnage* p);
  * Poses one frame: the animation `anim` at frame `image` (fractional frames round down), turned by `angle` (radians,
  * 0 = looking towards -y, positive = counter-clockwise seen from above), the feet at `pied` (world). Fills the
  * vertex buffer and returns the screen position of the feet and the top of the head.
+ *
+ * Depth follows the PS1 rule (field_kawai_char_model.c): every polygon goes into one ordering-table slot, the
+ * average of its vertices' camera depths / 4 (a quad: sum >> 4; a triangle: sum x 341 >> 12, the GTE's AVSZ3 with
+ * ZSF3 = 0x155), and at an equal slot the background tile wins (it is added to the table first). So all the
+ * vertices of a polygon get the depth 4 x slot + 2, depth-tested LEQUAL against the cards at 4 x ID.
  */
 void personnage_poser(Personnage* p, const CameraTerrain* cam, const float pied[3], float angle, int anim, float image,
                       float* sx_pied, float* sy_pied, float* sy_tete, float* z_pied);

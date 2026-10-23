@@ -16,6 +16,13 @@ The game itself (ff7-decomp through a PsyZ 3DS backend) comes later; this viewer
   occluding tile is drawn at `z = 4 x ID`, depth only, alpha-tested against the mask of the texels that occlude;
   a red test character then goes through the depth test. Walking it behind the train must hide it exactly where
   the PS1 would.
+- The PS1 sorting rule (`src/field/field_kawai_char_model.c`, read, not modified): every polygon of a model goes
+  into one ordering-table slot, the average camera depth of its vertices / 4 (a quad: `sum >> 4`; a triangle:
+  the GTE's `AVSZ3`, `sum x 341 >> 12`), and the background is added to the table before the models, so at an
+  equal slot the tile is drawn on top. The viewer gives every polygon one flat depth, `4 x slot + 2`, tested
+  `LEQUAL` against the cards at `4 x ID`: no polygon is ever cut by a card, and a tie goes to the tile.
+  A blended texel (STP bit of a semi-transparent tile, `parameter & 0x80`) is not in the mask: it never
+  occludes (MD1_1: the lamp glows on the floor, layer 2 at ID 0, used to hide Cloud when he arrived).
 - Cloud (package version 4, `docs/ff7-3d/cloud.md`): his model and his standing, walking and running animations,
   baked by the workshop from the player's `CLOUD.BCX`, stand on the field's real walkmesh. The circle pad walks
   him along the screen's right and forward axes projected on the ground (B held: he runs), he turns towards the

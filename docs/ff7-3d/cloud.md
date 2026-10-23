@@ -50,6 +50,10 @@ Also to check on the console: handedness (is Cloud mirrored? his pauldron is on 
   ~300 vertices with the field camera on the CPU (like `placer_temoin` did) and draws the triangles with
   `source/modele.v.pica`, the same projection, depth substrate and stereo as the relief. The depth test runs
   against the occlusion cards, so he passes behind layer-2 tiles where the PS1 did.
+- The PS1 sorting rule, polygon by polygon: the workshop marks the two triangles of a PS1 quad (`moities`, the
+  last byte of each triangle record, 1 then 2), and the 3DS gives every polygon one flat depth, its ordering-table
+  slot (`FieldModel*AddPrim`: a quad's four depths `>> 4`, a triangle's three through `AVSZ3`), `4 x slot + 2` so
+  that a tie goes to the tile, as on the PS1 where the background enters the table first (`port3ds/README.md`).
 - Cost: the bottom screen shows the CPU time of the pose ("pose de Cloud"), to compare with the frame time.
 - Speed: about 3 world units per frame walking, 6 running (B); half an animation frame per 60 Hz frame (the PS1
   field plays one per 30 Hz frame).

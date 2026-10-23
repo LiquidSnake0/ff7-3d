@@ -68,13 +68,17 @@ def composer(champ, mim, visibilite=None, couches=(1, 2, 3, 4)):
             abr = (t.tpage >> 5) & 3
             melange = opaque & stp
             plein = opaque & ~stp
+            # un texel fondu laisse voir ce qu'il y a derrière : il n'occulte pas, l'ID du texel
+            # reste celui de ce qui est dessous (sur MD1_1, les lueurs des lampes, ID 0, cachaient Cloud)
+            occulte = plein
             zone[melange, :3] = _melanger(zone[melange, :3], rgba[melange, :3], abr)
             zone[melange, 3] = 255
             zone[plein] = rgba[plein]
         else:
             zone[opaque] = rgba[opaque]
-        prof[py:py + t.taille, px:px + t.taille][opaque] = t.profondeur
-        couche[py:py + t.taille, px:px + t.taille][opaque] = t.couche
+            occulte = opaque
+        prof[py:py + t.taille, px:px + t.taille][occulte] = t.profondeur
+        couche[py:py + t.taille, px:px + t.taille][occulte] = t.couche
     return Fond(image, prof, couche, (x0, y0))
 
 

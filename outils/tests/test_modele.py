@@ -77,6 +77,22 @@ class TestCloud(unittest.TestCase):
         self.assertTrue(all(max(t[:3]) < c.nb_sommets for t in c.triangles))
         self.assertTrue(115 < c.hauteur < 140)
 
+    def test_moities_de_quad(self):
+        # chaque quad PS1 donne deux triangles consécutifs marqués 1 puis 2 ; un triangle PS1 est marqué 0
+        c = modele.cuire(self.cloud, animations=[0])
+        self.assertEqual(len(c.moities), len(c.triangles))
+        nb_quads = sum(len(pg.sommets) == 4 for p in self.cloud.parties for pg in p.polygones)
+        nb_tris = sum(len(pg.sommets) == 3 for p in self.cloud.parties for pg in p.polygones)
+        self.assertEqual(c.moities.count(1), nb_quads)
+        self.assertEqual(c.moities.count(2), nb_quads)
+        self.assertEqual(c.moities.count(0), nb_tris)
+        self.assertGreater(nb_quads, 0)
+        for i, m in enumerate(c.moities):
+            if m == 1:
+                self.assertEqual(c.moities[i + 1], 2)
+                # les deux moitiés partagent deux sommets et en couvrent quatre
+                self.assertEqual(len(set(c.triangles[i][:3]) | set(c.triangles[i + 1][:3])), 4)
+
     def test_section_personnage_du_paquet(self):
         import io
         import struct
@@ -87,6 +103,9 @@ class TestCloud(unittest.TestCase):
         b = f.getvalue()
         magie, nb_s, nb_t, nb_a, _b, _b2, h = struct.unpack_from("<4sHHBBHf", b, 0)
         self.assertEqual((magie, nb_s, nb_t, nb_a), (b"PERS", 298, len(c.triangles), 2))
+        # le dernier octet de chaque triangle : sa moitié de quad (0, 1 ou 2)
+        moities = [b[16 + 16 * t + 15] for t in range(nb_t)]
+        self.assertEqual(moities, c.moities)
         p = 16 + 16 * nb_t
         self.assertEqual(struct.unpack_from("<H", b, p)[0], 1)
         p += 4 + 298 * 12

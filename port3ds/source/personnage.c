@@ -27,7 +27,7 @@ typedef struct
 {
 	u16 i[3];
 	u8 rgb[9];
-	u8 bourrage;
+	u8 moitie; /* 1 then 2: the two consecutive halves of a PS1 quad; 0: a PS1 triangle (old packages: 0) */
 } __attribute__((packed)) TrianglePersonnage;
 
 int personnage_charger(FILE* f, Personnage* p)
@@ -46,9 +46,11 @@ int personnage_charger(FILE* f, Personnage* p)
 	p->hauteur = e.hauteur;
 	p->sommets_tri = malloc((size_t)e.nb_triangles * 3 * sizeof(u16));
 	p->couleurs = malloc((size_t)e.nb_triangles * 9);
+	p->sommets_tri_prof = malloc((size_t)e.nb_triangles * 4 * sizeof(u16));
+	p->nb_prof = malloc((size_t)e.nb_triangles);
 	p->ecran = malloc((size_t)e.nb_sommets * 3 * sizeof(float));
 	p->tampon = linearAlloc((size_t)e.nb_triangles * 3 * 7 * sizeof(float));
-	if (!p->sommets_tri || !p->couleurs || !p->ecran || !p->tampon)
+	if (!p->sommets_tri || !p->couleurs || !p->sommets_tri_prof || !p->nb_prof || !p->ecran || !p->tampon)
 		return -1;
 	for (t = 0; t < e.nb_triangles; t++)
 	{
@@ -59,6 +61,20 @@ int personnage_charger(FILE* f, Personnage* p)
 		memcpy(p->couleurs + t * 9, tr.rgb, 9);
 		if (tr.i[0] >= e.nb_sommets || tr.i[1] >= e.nb_sommets || tr.i[2] >= e.nb_sommets)
 			return -1;
+		memcpy(p->sommets_tri_prof + t * 4, tr.i, sizeof(tr.i));
+		p->nb_prof[t] = 3;
+		if (tr.moitie == 2 && t > 0)
+		{
+			/* the second half of a quad: both halves average the quad's four vertices (0 1 2 and 1 3 2) */
+			u16* a = p->sommets_tri_prof + (t - 1) * 4;
+			int k, n = 3;
+			for (k = 0; k < 3 && n < 4; k++)
+				if (tr.i[k] != a[0] && tr.i[k] != a[1] && tr.i[k] != a[2])
+					a[n++] = tr.i[k];
+			p->nb_prof[t - 1] = (u8)n;
+			memcpy(p->sommets_tri_prof + t * 4, a, 4 * sizeof(u16));
+			p->nb_prof[t] = (u8)n;
+		}
 	}
 	for (a = 0; a < e.nb_anims; a++)
 	{
@@ -128,6 +144,22 @@ void personnage_poser(Personnage* p, const CameraTerrain* cam, const float pied[
 		v[5] = rgb[2] / 255.0f;
 		v[6] = 1.0f;
 	}
+	/* the PS1 rule (personnage.h): one ordering-table slot per polygon, the tile wins at an equal slot */
+	for (i = 0; i < p->nb_triangles; i++)
+	{
+		const u16* idx = p->sommets_tri_prof + (size_t)i * 4;
+		int somme = 0, case_ot;
+		float z;
+		for (k = 0; k < p->nb_prof[i]; k++)
+			somme += (int)p->ecran[idx[k] * 3 + 2]; /* the GTE's SZ: integer camera depths */
+		case_ot = p->nb_prof[i] == 4 ? somme >> 4 : (somme * 341) >> 12;
+		if (case_ot > 4095)
+			case_ot = 4095;
+		z = 4.0f * case_ot + 2.0f;
+		p->tampon[(size_t)i * 21 + 2] = z;
+		p->tampon[(size_t)i * 21 + 9] = z;
+		p->tampon[(size_t)i * 21 + 16] = z;
+	}
 	GSPGPU_FlushDataCache(p->tampon, (size_t)p->nb_triangles * 3 * 7 * sizeof(float));
 	{
 		float cc[3];
@@ -147,6 +179,8 @@ void personnage_liberer(Personnage* p)
 	int a;
 	free(p->sommets_tri);
 	free(p->couleurs);
+	free(p->sommets_tri_prof);
+	free(p->nb_prof);
 	free(p->ecran);
 	if (p->tampon)
 		linearFree(p->tampon);
