@@ -196,5 +196,29 @@ class TestMd1stin(unittest.TestCase):
         self.assertTrue(all(c[3] == 2 and c[2] == 16 for c in cartes))
 
 
+@unittest.skipUnless(DISQUE_PRESENT, "disque absent")
+class TestMd1_1(unittest.TestCase):
+    """MD1_1 : les lueurs des lampes (couche 2, ID 0, semi-transparentes) ne doivent pas occulter Cloud."""
+
+    @classmethod
+    def setUpClass(cls):
+        with Disque(chemins.DISQUE) as d:
+            cls.champ, cls.mim = field.charger(d, "MD1_1")
+
+    def test_les_texels_fondus_n_occultent_pas(self):
+        lueurs = [t for t in self.champ.tuiles if t.couche == 2 and t.profondeur == 0 and t.semi_transparente]
+        self.assertGreater(len(lueurs), 100)
+        compose = fond.composer(self.champ, self.mim)
+        ox, oy = compose.origine
+        # là où Cloud arrive depuis la gare (triangle 90 du walkmesh, écran (13, 34)), le texel visible est une
+        # lueur fondue : son ID d'occlusion doit être celui du sol dessous, jamais 0
+        px, py = 13 - ox, 34 - oy
+        ids = compose.profondeur_id[py - 16:py + 2, px - 6:px + 7]
+        self.assertFalse((ids == 0).any())
+        # et aucune case d'ID 0 ne subsiste dans le masque là où une lueur fondue est visible
+        masque = relief.masque_occlusion(compose)
+        self.assertEqual(masque[py - 16:py + 2, px - 6:px + 7].max(), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

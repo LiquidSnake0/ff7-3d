@@ -25,7 +25,8 @@ Format .f3d, petit-boutiste, version 5 :
         u16   nb_cartes
         cartes nb_cartes x (s16 x, s16 y, u8 taille, u8 couche, u16 id) : une carte plate par tuile, à z = 4 · id
         masque tex_l x tex_h en A8 tuilé comme la texture : 255 là où le texel visible vient d'une tuile qui
-               occulte (couches 2 à 4), 0 ailleurs
+               occulte (couches 2 à 4), 0 ailleurs ; un texel fondu (semi-transparence, bit STP) n'occulte
+               pas, il laisse voir ce qu'il y a derrière
 
     caméra et walkmesh (version 3)
         s16   matrice[9]    axes de la caméra, virgule fixe 4.12
@@ -42,7 +43,8 @@ Format .f3d, petit-boutiste, version 5 :
         u8    nb_animations 0 debout, 1 marche, 2 course pour les personnages de l'équipe
         u8, u16 bourrage
         f32   hauteur       en unités du monde
-        triangles nb_triangles x (u16 i[3], u8 rgb[3][3], u8 bourrage)
+        triangles nb_triangles x (u16 i[3], u8 rgb[3][3], u8 moitie) : moitie = 1 puis 2 pour les deux
+               triangles consécutifs d'un quad PS1 (une seule profondeur de tri pour les deux), 0 sinon
         animations nb_animations x (u16 nb_images, u16 bourrage, nb_images x nb_sommets x f32[3]) :
                sommets dans le repère du monde, pieds à l'origine, regard vers -y (direction 0)
 
@@ -54,7 +56,10 @@ Format .f3d, petit-boutiste, version 5 :
 
 La 3DS dessine d'abord le relief (couleur seule, sans écrire la profondeur), puis les cartes d'occlusion
 (profondeur seule, test alpha sur le masque), puis les objets du jeu avec le test de profondeur : un
-personnage passe derrière une tuile exactement quand il le faisait sur PS1.
+personnage passe derrière une tuile exactement quand il le faisait sur PS1. La règle PS1 : chaque polygone
+du personnage entre dans une seule case de l'ordering table (moyenne des z de ses sommets / 4, tronquée),
+et à case égale la tuile gagne (le décor est ajouté avant les modèles, addPrim insère en tête). La 3DS
+donne donc à tout le polygone la profondeur 4 · case + 2, testée en LEQUAL contre la carte à 4 · ID.
 """
 import struct
 
@@ -143,8 +148,9 @@ def ecrire_personnage(f, cuisson):
         return
     f.write(struct.pack("<4sHHBBHf", b"PERS", cuisson.nb_sommets, len(cuisson.triangles), len(cuisson.animations),
                         0, 0, cuisson.hauteur))
-    for i0, i1, i2, c0, c1, c2 in cuisson.triangles:
-        f.write(struct.pack("<3H9Bx", i0, i1, i2, *c0, *c1, *c2))
+    moities = cuisson.moities or [0] * len(cuisson.triangles)
+    for (i0, i1, i2, c0, c1, c2), m in zip(cuisson.triangles, moities):
+        f.write(struct.pack("<3H9BB", i0, i1, i2, *c0, *c1, *c2, m))
     for images in cuisson.animations:
         f.write(struct.pack("<HH", len(images), 0))
         f.write(np.ascontiguousarray(images, dtype="<f4").tobytes())

@@ -32,7 +32,8 @@ D. 3DS renderer (port3ds/, citro3d)
   game's own anchors.
 - The **occlusion depth** reproduces the PS1 ordering table exactly: layer-2 tiles at `4 x ID`, layers 3 and 4 at
   their current depth (the `BGPDH` script opcode can change it), layer 1 at infinity. Cloud walks behind a pillar
-  exactly when he did on the PS1.
+  exactly when he did on the PS1: one slot per polygon (the average depth of its vertices / 4), the tile winning
+  a tie; a blended texel of a semi-transparent tile never occludes (`port3ds/README.md`).
 
 ## What the field data gives (read from ff7-decomp's `src/field/field_bg.c`, not modified)
 

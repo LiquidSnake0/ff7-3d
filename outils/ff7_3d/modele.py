@@ -21,7 +21,7 @@ Les personnages de l'équipe (Cloud…) viennent d'un BCX (FIELD/CLOUD.BCX…), 
 """
 import math
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, field as champ
 
 import numpy as np
 
@@ -245,17 +245,24 @@ class Cuisson:
     triangles: list         # (i0, i1, i2, (r, g, b) * 3) indices globaux
     animations: list        # par animation : tableau (images, nb_sommets, 3) float32
     hauteur: float
+    moities: list = champ(default_factory=list)  # par triangle : 0 seul, 1 et 2 les deux moitiés d'un quad PS1
 
 
 def cuire(modele, animations=None):
-    """Calcule toutes les images des animations demandées (toutes par défaut)."""
+    """Calcule toutes les images des animations demandées (toutes par défaut).
+
+    Un quad PS1 donne deux triangles consécutifs, marqués 1 puis 2 dans `moities` : la 3DS leur donne la
+    profondeur de tri du quad entier, comme la PS1 (une case d'ordering table par polygone)."""
     debuts = np.cumsum([0] + [len(p.sommets) for p in modele.parties])
     tris = []
+    moities = []
     for p, d in zip(modele.parties, debuts):
         for pg in p.polygones:
-            for a, b, c in triangles(pg):
+            morceaux = triangles(pg)
+            for n, (a, b, c) in enumerate(morceaux):
                 tris.append((int(d + pg.sommets[a]), int(d + pg.sommets[b]), int(d + pg.sommets[c]),
                              pg.couleurs[a], pg.couleurs[b], pg.couleurs[c]))
+                moities.append(n + 1 if len(morceaux) == 2 else 0)
     r, t = racine(np.eye(3), np.zeros(3), np.zeros(3), 0)
     anims = []
     for k in (range(len(modele.animations)) if animations is None else animations):
@@ -263,4 +270,4 @@ def cuire(modele, animations=None):
         images = [np.concatenate(sommets_monde(modele, matrices(modele, k, i, r, t))) for i in range(a.nb_images)]
         anims.append(np.asarray(images, dtype=np.float32))
     hauteur = float(anims[0][0][:, 2].max()) if anims else 0.0
-    return Cuisson(int(debuts[-1]), tris, anims, hauteur)
+    return Cuisson(int(debuts[-1]), tris, anims, hauteur, moities)

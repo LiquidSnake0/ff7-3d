@@ -438,27 +438,33 @@ static float projeter(const Relief* r, const float v[3], float* sx, float* sy)
 	return c[2];
 }
 
+/* Height of walkmesh triangle i under (x, y), or 0 when (x, y) is outside it. */
+static int sol_du_triangle(const Relief* r, int i, float x, float y, float* z)
+{
+	const s16(*t)[3] = r->triangles[i];
+	float ax = t[0][0], ay = t[0][1], bx = t[1][0], by = t[1][1], cx = t[2][0], cy = t[2][1];
+	float aire = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+	float w0, w1, w2;
+	if (aire > -1e-3f && aire < 1e-3f)
+		return 0;
+	w0 = ((bx - x) * (cy - y) - (by - y) * (cx - x)) / aire;
+	w1 = ((cx - x) * (ay - y) - (cy - y) * (ax - x)) / aire;
+	w2 = 1.0f - w0 - w1;
+	if (w0 >= -1e-4f && w1 >= -1e-4f && w2 >= -1e-4f)
+	{
+		*z = w0 * t[0][2] + w1 * t[1][2] + w2 * t[2][2];
+		return 1;
+	}
+	return 0;
+}
+
 /* Height of the floor under (x, y), or 0 when (x, y) is off the walkmesh. */
 static int sol(const Relief* r, float x, float y, float* z)
 {
 	int i;
 	for (i = 0; i < r->nb_triangles; i++)
-	{
-		const s16(*t)[3] = r->triangles[i];
-		float ax = t[0][0], ay = t[0][1], bx = t[1][0], by = t[1][1], cx = t[2][0], cy = t[2][1];
-		float aire = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
-		float w0, w1, w2;
-		if (aire > -1e-3f && aire < 1e-3f)
-			continue;
-		w0 = ((bx - x) * (cy - y) - (by - y) * (cx - x)) / aire;
-		w1 = ((cx - x) * (ay - y) - (cy - y) * (ax - x)) / aire;
-		w2 = 1.0f - w0 - w1;
-		if (w0 >= -1e-4f && w1 >= -1e-4f && w2 >= -1e-4f)
-		{
-			*z = w0 * t[0][2] + w1 * t[1][2] + w2 * t[2][2];
+		if (sol_du_triangle(r, i, x, y, z))
 			return 1;
-		}
-	}
 	return 0;
 }
 
@@ -486,8 +492,10 @@ static void placer_temoin(Relief* r, const float pied[3], float* px, float* py)
 /*
  * One eye. The order is the design of docs/ff7-3d/README.md (layer D):
  * 1. the relief: colour only, no depth writes (the stereo depth is for the eyes, not for sorting);
- * 2. the occlusion cards of the original game: depth only, alpha-tested against the mask;
- * 3. the game's objects (here the test object): depth test against the cards.
+ * 2. the occlusion cards of the original game: depth only, alpha-tested against the mask (a blended texel,
+ *    STP bit of a semi-transparent tile, is not in the mask: it never occludes);
+ * 3. the game's objects (here the test object): depth test against the cards, one flat depth per polygon like
+ *    the PS1 ordering table (personnage.h), the tile winning at an equal slot.
  * Mtx_OrthoTilt maps a larger vertex z to a smaller stored depth: LEQUAL with the clear at the far end
  * (CTR-3D, n3ds_backend.c).
  */
@@ -780,7 +788,12 @@ static int franchir(Etat* et, const float avant[3], char* chemin, size_t taille)
 		snprintf(chemin, taille, "%s", cible);
 		et->pied[0] = porte.arrivee[0];
 		et->pied[1] = porte.arrivee[1];
-		if (sol(&et->relief, et->pied[0], et->pied[1], &z))
+		/* the game names the walkmesh triangle under the arrival (pcPosI): its height first, so a floor that
+		 * passes under a bridge cannot catch Cloud; the first triangle under (x, y) otherwise */
+		if (porte.triangle >= 0 && porte.triangle < et->relief.nb_triangles &&
+		    sol_du_triangle(&et->relief, porte.triangle, et->pied[0], et->pied[1], &z))
+			et->pied[2] = z;
+		else if (sol(&et->relief, et->pied[0], et->pied[1], &z))
 			et->pied[2] = z;
 		else if (porte.triangle >= 0 && porte.triangle < et->relief.nb_triangles)
 		{
