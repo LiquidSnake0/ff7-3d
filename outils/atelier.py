@@ -20,7 +20,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from ff7_3d import chemins, ecrans, field, fond, modele, profondeur, relief, rendu, reperes  # noqa: E402
+from ff7_3d import chemins, ecrans, field, fond, modele, murs, profondeur, relief, rendu, reperes  # noqa: E402
 from ff7_3d.disque import Disque  # noqa: E402
 
 
@@ -48,6 +48,8 @@ def traiter(nom, pas=4, etats=None, personnage=True):
     rgb[compose.image[..., 3] == 0] = 0
     disp = profondeur.disparite(rgb)
     z, rapport = profondeur.recaler(disp, rp, champ, compose)
+    z, bilan_murs, aretes = murs.appliquer(z, champ, compose, rp)
+    rapport["murs"] = bilan_murs
     sol = rp.z_sol[np.isfinite(rp.z_sol)]
     z_conv = float(np.median(sol)) if sol.size else float(np.median(z))
     dossier = nom.lower()
@@ -65,6 +67,7 @@ def traiter(nom, pas=4, etats=None, personnage=True):
         lz = np.log(z)
         gris = (255 * (1 - (lz - lz.min()) / max(np.ptp(lz), 1e-9))).astype(np.uint8)
         Image.fromarray(gris).save(chemins.sortie(dossier, "profondeur.png"))
+        murs.dessiner_controle(compose, champ.camera, aretes).save(chemins.sortie(dossier, "murs.png"))
         if cuisson is not None and champ.walkmesh.triangles:
             # contrôle : le personnage debout au milieu du sol praticable, regard vers la caméra
             pos = rendu.depart(champ, compose)

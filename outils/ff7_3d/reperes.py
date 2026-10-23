@@ -24,11 +24,19 @@ class Reperes:
 
 
 def rasteriser_sol(champ, forme, origine):
+    return rasteriser(champ.camera, forme, origine, champ.walkmesh.triangles)
+
+
+def rasteriser(camera, forme, origine, triangles):
+    """Profondeur caméra (perspective correcte) des triangles du monde vus par la caméra ; NaN ailleurs.
+    En cas de recouvrement, le plus proche gagne."""
     h, l = forme
     ox, oy = origine
     z_sol = np.full((h, l), np.nan)
-    pts = np.array([v for tri in champ.walkmesh.triangles for v in tri], dtype=np.float64)
-    ecran, z = cam.projeter(champ.camera, pts)
+    pts = np.array([v for tri in triangles for v in tri], dtype=np.float64)
+    if not len(pts):
+        return z_sol
+    ecran, z = cam.projeter(camera, pts)
     ys, xs = np.mgrid[0:h, 0:l]
     px = xs + ox + 0.5
     py = ys + oy + 0.5
