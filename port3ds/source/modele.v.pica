@@ -3,7 +3,8 @@
 ; Adapted from CTR-3D (https://github.com/zando95/CTR-3D),
 ; platform/n3ds/shaders/ctr_model.v.pica, GPL-3.0, by zando95 and the CTR-3D
 ; contributors: the perspective-correct depth substrate, the stereo parallax
-; p = k - kC/depth and the PICA200 operand rules are theirs. Changes for
+; p = k - kC/depth and the PICA200 operand rules are theirs (ff7-3d softens
+; the near side: u = 1 - C/depth, u' = u / (1 + max(-u, 0)), p = k * u'). Changes for
 ; ff7-3d (input already in PS1 screen space, one baked relief mesh per field)
 ; are distributed with the whole project under the AGPL-3.0; GPL-3.0 code may
 ; be combined with AGPL-3.0 code (section 13 of both licenses).
@@ -26,7 +27,7 @@
 
 .fvec projection[4] ; f0-f3, Mtx_OrthoTilt over the visible PS1 screen window
 .fvec hParam        ; x = H (field camera zoom), y = 1 / H
-.fvec stereo        ; x = k, y = k * convergence, z/w = clamp lo/hi (zeros in mono)
+.fvec stereo        ; x = k, y = convergence C, z/w = clamp lo/hi = -|k|/|k| (zeros in mono)
 
 .constf constants(0.0, 1.0, -1.0, 32735.0)
 .alias  zeros      constants.xxxx
@@ -61,11 +62,19 @@
 	max r3.w, depthMin, r2.zzzz
 	min r3.w, depthMax, r3.wwww
 
-	; stereo: p = clamp(k - kC / depth, lo, hi), a += w * p
+	; stereo: u = 1 - C / depth (far: up to 1, near: unbounded), softened on the near side
+	; u' = u / (1 + max(-u, 0)) so what pops out never exceeds k, smoothly (no hard clamp edge);
+	; p = clamp(k * u', lo, hi), a += w * p
 	rcp r5.x, r3.w
 	mul r5.y, stereo.yyyy, r5.xxxx
 	mul r5.y, negOne, r5.yyyy
-	add r5.y, stereo.xxxx, r5.yyyy
+	add r5.y, ones, r5.yyyy
+	mul r5.z, negOne, r5.yyyy
+	max r5.z, zeros, r5.zzzz
+	add r5.z, ones, r5.zzzz
+	rcp r5.z, r5.z
+	mul r5.y, r5.yyyy, r5.zzzz
+	mul r5.y, stereo.xxxx, r5.yyyy
 	max r5.y, stereo.zzzz, r5.yyyy
 	min r5.y, stereo.wwww, r5.yyyy
 	mul r5.z, r1.zzzz, r5.yyyy
